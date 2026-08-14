@@ -2,10 +2,10 @@ name: Daily Structure Report
 
 on:
   schedule:
-    # 每週一到五，UTC 21:00 = 台灣時間隔天 05:00
-    # 若要改時間，用 https://crontab.guru 查
-    - cron: "0 21 * * 1-5"
-  workflow_dispatch:  # 允許在網頁手動按一次跑
+    # 台灣時間 08:02（週二～週六）＝ 對應美股週一～週五盤後結束後
+    # UTC 00:02，週一到週五
+    - cron: "2 0 * * 1-5"
+  workflow_dispatch:
 
 jobs:
   run-report:
