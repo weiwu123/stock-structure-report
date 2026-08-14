@@ -74,7 +74,8 @@ def bb_position(price, upper, lower):
 
 
 def find_swings(high, low, left=2, right=2):
-    h, l = high.values.astype(float), low.values.astype(float)
+    h = high.values.astype(float)
+    l = low.values.astype(float)
     n = len(h)
     sh, sl = [], []
     for i in range(left, n - right):
@@ -105,21 +106,27 @@ def hist_stats(hist, side):
     max_fwd = max(FORWARD_LIST)
     if n < SHORT_DAYS + max_fwd + 50:
         return None
+
     rets_map = {d: [] for d in FORWARD_LIST}
     for i in range(SHORT_DAYS + 2, n - max_fwd):
         px = closes[i]
         if side == "support":
             lvl = np.min(lows[i - SHORT_DAYS : i])
-            dist = (px - lvl) / px * 100 if lvl > 0 else 999
+            if lvl <= 0:
+                continue
+            dist = (px - lvl) / px * 100
             if not (0 <= dist <= NEAR_PCT):
                 continue
         else:
             lvl = np.max(highs[i - SHORT_DAYS : i])
-            dist = (lvl - px) / px * 100 if lvl > 0 else 999
+            if lvl <= 0:
+                continue
+            dist = (lvl - px) / px * 100
             if not (0 <= dist <= NEAR_PCT):
                 continue
         for d in FORWARD_LIST:
             rets_map[d].append((closes[i + d] - px) / px * 100)
+
     out = {}
     for d in FORWARD_LIST:
         arr = rets_map[d]
@@ -134,19 +141,68 @@ def hist_stats(hist, side):
     return out
 
 
+def make_suggestion(r):
+    """依支撐/壓力/狀態給進出參考（非投資建議）"""
+    sup = r["support"]
+    res = r["resist"]
+    event = r["event"]
+    bb = r["bb_label"]
+    px = r["price"]
+
+    entry_lo = sup
+    entry_hi = sup * 1.015
+    stop = sup * 0.99
+    mid = (sup + res) / 2
+
+    if event == "跌破5日低":
+        return (
+            f"建議：偏弱，先觀望｜等站回 {sup:.2f}–{entry_hi:.2f} 再考慮｜未站回不追"
+        )
+
+    if event == "突破5日高":
+        return (
+            f"建議：偏強｜回測 {sup:.2f}–{px:.2f} 可考慮接｜"
+            f"停損 <{stop:.2f}｜目標 {res:.2f}"
+        )
+
+    if event == "靠近支撐" or "下軌" in bb:
+        return (
+            f"建議：偏支撐區｜進 {entry_lo:.2f}–{entry_hi:.2f}｜"
+            f"停損 <{stop:.2f}｜目標 {mid:.2f} / {res:.2f}"
+        )
+
+    if event == "靠近壓力" or "上軌" in bb:
+        return (
+            f"建議：接近壓力，慎追高｜減碼/出場參考 {res * 0.99:.2f}–{res:.2f}｜"
+            f"未突破不追｜回落看 {mid:.2f}"
+        )
+
+    return (
+        f"建議：區間中段，等邊緣｜偏多等 {entry_lo:.2f}–{entry_hi:.2f}｜"
+        f"偏出看 {res * 0.99:.2f}–{res:.2f}"
+    )
+
+
 def analyze(ticker, hist):
-    close, high, low, vol = hist["Close"], hist["High"], hist["Low"], hist["Volume"]
+    close = hist["Close"]
+    high = hist["High"]
+    low = hist["Low"]
+    vol = hist["Volume"]
     price = float(close.iloc[-1])
+
     s_high = float(high.iloc[-SHORT_DAYS:].max())
     s_low = float(low.iloc[-SHORT_DAYS:].min())
+
     sh, sl = find_swings(high.iloc[-60:], low.iloc[-60:])
     support, resist = nearest_levels(price, sh, sl, s_high, s_low)
     dist_sup = (price - support) / price * 100
     dist_res = (resist - price) / price * 100
-    near_sup, near_res = dist_sup <= NEAR_PCT, dist_res <= NEAR_PCT
+    near_sup = dist_sup <= NEAR_PCT
+    near_res = dist_res <= NEAR_PCT
 
     bb_u, bb_m, bb_l = bollinger(close)
     bb_label, bb_pct = bb_position(price, bb_u, bb_l)
+
     slope = linear_slope(close.iloc[-12:])
     channel = channel_label(slope)
 
@@ -155,6 +211,7 @@ def analyze(ticker, hist):
         prev_lo = float(low.iloc[-SHORT_DAYS - 1 : -1].min())
     else:
         prev_hi, prev_lo = s_high, s_low
+
     breakout = price > prev_hi * 1.002
     breakdown = price < prev_lo * 0.998
 
@@ -169,11 +226,8 @@ def analyze(ticker, hist):
     else:
         event = "中段"
 
-    vol_ratio = (
-        float(vol.iloc[-3:].mean()) / float(vol.iloc[-10:].mean())
-        if float(vol.iloc[-10:].mean()) > 0
-        else 1.0
-    )
+    vol_base = float(vol.iloc[-10:].mean())
+    vol_ratio = float(vol.iloc[-3:].mean()) / vol_base if vol_base > 0 else 1.0
     if vol_ratio >= 1.4:
         vol_desc = f"放量{vol_ratio:.1f}x"
     elif vol_ratio <= 0.7:
@@ -188,7 +242,7 @@ def analyze(ticker, hist):
     else:
         stats, side = None, None
 
-    return {
+    r = {
         "ticker": ticker,
         "price": price,
         "support": support,
@@ -210,6 +264,8 @@ def analyze(ticker, hist):
         "stats": stats,
         "side": side,
     }
+    r["suggestion"] = make_suggestion(r)
+    return r
 
 
 def event_class(event):
@@ -229,12 +285,17 @@ def build_html(results, now_str):
     bd = [r["ticker"] for r in results if r["breakdown"]]
     up = [r["ticker"] for r in results if "上軌" in r["bb_label"]]
     dn = [r["ticker"] for r in results if "下軌" in r["bb_label"]]
-    focus = [r for r in results if r["near_sup"] or r["near_res"] or r["breakout"] or r["breakdown"]]
+    focus = [
+        r
+        for r in results
+        if r["near_sup"] or r["near_res"] or r["breakout"] or r["breakdown"]
+    ]
 
     rows = []
     for r in results:
+        cls = event_class(r["event"])
         rows.append(
-            f"""<tr class="{event_class(r['event'])}">
+            f"""<tr class="{cls}">
             <td><b>{html.escape(r['ticker'])}</b></td>
             <td class="num">{r['price']:.2f}</td>
             <td class="num">{r['support']:.2f}</td>
@@ -245,7 +306,8 @@ def build_html(results, now_str):
             <td>{html.escape(r['event'])}</td>
             <td>{html.escape(r['bb_label'])}</td>
             <td>{html.escape(r['vol_desc'])}</td>
-            </tr>"""
+            </tr>
+            <tr class="suggest"><td colspan="10">↳ {html.escape(r.get('suggestion', ''))}</td></tr>"""
         )
 
     focus_rows = []
@@ -268,8 +330,13 @@ def build_html(results, now_str):
             <td class="num">{r['resist']:.2f}</td>
             <td>{html.escape(r['bb_label'])}</td>
             <td class="stat">{html.escape(stat)}</td>
-            </tr>"""
+            </tr>
+            <tr class="suggest"><td colspan="7">↳ {html.escape(r.get('suggestion', ''))}</td></tr>"""
         )
+
+    focus_body = (
+        "".join(focus_rows) if focus_rows else '<tr><td colspan="7">無</td></tr>'
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="zh-Hant">
@@ -278,23 +345,62 @@ def build_html(results, now_str):
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>結構分析報告</title>
 <style>
-body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-       margin: 12px; background: #0f1115; color: #e8eaed; }}
+body {{
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  margin: 12px; background: #0f1115; color: #e8eaed;
+}}
 h1 {{ font-size: 1.25rem; margin: 0 0 4px; }}
-.meta {{ color: #9aa0a6; font-size: 0.85rem; margin-bottom: 16px; }}
-h2 {{ font-size: 1.05rem; margin: 20px 0 8px; border-bottom: 1px solid #333; padding-bottom: 4px; }}
-.summary span {{ display: inline-block; background: #1e222a; padding: 4px 8px;
-                 border-radius: 6px; margin: 2px 4px 2px 0; font-size: 0.85rem; }}
+.meta {{ color: #9aa0a6; font-size: 0.85rem; margin-bottom: 12px; }}
+h2 {{
+  font-size: 1.05rem; margin: 20px 0 8px;
+  border-bottom: 1px solid #333; padding-bottom: 4px;
+}}
+.summary span {{
+  display: inline-block; background: #1e222a; padding: 4px 8px;
+  border-radius: 6px; margin: 2px 4px 2px 0; font-size: 0.85rem;
+}}
+.legend {{ font-size: 0.8rem; color: #9aa0a6; margin: 8px 0 12px; }}
+.legend i {{
+  display: inline-block; width: 10px; height: 10px;
+  border-radius: 2px; margin: 0 4px 0 10px; vertical-align: middle;
+}}
 .wrap {{ overflow-x: auto; -webkit-overflow-scrolling: touch; }}
-table {{ border-collapse: collapse; width: 100%; min-width: 720px; font-size: 0.85rem; }}
-th, td {{ border-bottom: 1px solid #2a2f3a; padding: 8px 6px; text-align: left; white-space: nowrap; }}
-th {{ color: #9aa0a6; font-weight: 600; position: sticky; top: 0; background: #0f1115; }}
-td.num {{ font-variant-numeric: tabular-nums; text-align: right; }}
-td.stat {{ white-space: normal; min-width: 160px; color: #bdc1c6; }}
-tr.up td {{ background: rgba(46, 160, 67, 0.12); }}
-tr.down td {{ background: rgba(248, 81, 73, 0.12); }}
-tr.resist td {{ background: rgba(210, 153, 34, 0.10); }}
-tr.support td {{ background: rgba(88, 166, 255, 0.10); }}
+table {{
+  border-collapse: collapse; width: 100%;
+  min-width: 720px; font-size: 0.85rem;
+}}
+th, td {{
+  border-bottom: 1px solid #2a2f3a; padding: 8px 6px; text-align: left;
+}}
+th {{
+  color: #9aa0a6; font-weight: 600; position: sticky; top: 0;
+  background: #0f1115; white-space: nowrap;
+}}
+td.num {{
+  font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap;
+}}
+td.stat {{ white-space: normal; min-width: 140px; color: #bdc1c6; }}
+tr.up td {{
+  background: #0d3d1a !important;
+  box-shadow: inset 4px 0 0 #3dd68c;
+}}
+tr.down td {{
+  background: #4a1515 !important;
+  box-shadow: inset 4px 0 0 #ff6b6b;
+}}
+tr.resist td {{
+  background: #3d3010 !important;
+  box-shadow: inset 4px 0 0 #f0c14b;
+}}
+tr.support td {{
+  background: #0d2a4a !important;
+  box-shadow: inset 4px 0 0 #58a6ff;
+}}
+tr.suggest td {{
+  background: #161b22; color: #9ecbff; font-size: 0.8rem;
+  padding-top: 2px; padding-bottom: 10px;
+  border-bottom: 1px solid #3a3f4a; white-space: normal;
+}}
 .footer {{ margin-top: 20px; color: #6b7280; font-size: 0.75rem; }}
 </style>
 </head>
@@ -309,6 +415,12 @@ tr.support td {{ background: rgba(88, 166, 255, 0.10); }}
   <span>布林上軌：{", ".join(up) if up else "無"}</span>
   <span>布林下軌：{", ".join(dn) if dn else "無"}</span>
 </div>
+<div class="legend">
+  <i style="background:#3dd68c;margin-left:0"></i>突破
+  <i style="background:#ff6b6b"></i>跌破
+  <i style="background:#f0c14b"></i>靠近壓力
+  <i style="background:#58a6ff"></i>靠近支撐
+</div>
 
 <h2>需關注</h2>
 <div class="wrap">
@@ -317,7 +429,7 @@ tr.support td {{ background: rgba(88, 166, 255, 0.10); }}
 <th>代號</th><th>現價</th><th>狀態</th><th>支撐</th><th>壓力</th><th>布林</th><th>歷史勝率</th>
 </tr></thead>
 <tbody>
-{''.join(focus_rows) if focus_rows else '<tr><td colspan="7">無</td></tr>'}
+{focus_body}
 </tbody>
 </table>
 </div>
@@ -335,7 +447,9 @@ tr.support td {{ background: rgba(88, 166, 255, 0.10); }}
 </table>
 </div>
 
-<div class="footer">資料來源 yfinance · 僅供參考，非投資建議</div>
+<div class="footer">
+資料來源 yfinance · 建議依支撐/壓力/布林自動產生，僅供參考，非投資建議
+</div>
 </body>
 </html>
 """
@@ -354,11 +468,10 @@ def main():
         results.append(analyze(t, hist))
         print(f"ok {t}")
 
-    html_doc = build_html(results, now_str)
-    out_name = "report.html"
-    with open(out_name, "w", encoding="utf-8") as f:
-        f.write(html_doc)
-    print(f"written {out_name}")
+    doc = build_html(results, now_str)
+    with open("report.html", "w", encoding="utf-8") as f:
+        f.write(doc)
+    print("written report.html")
 
 
 if __name__ == "__main__":
