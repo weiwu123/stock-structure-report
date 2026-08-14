@@ -34,7 +34,7 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add latest_report.txt
+          git add report.html
           # 若沒有變更就不 commit
           git diff --staged --quiet || git commit -m "update report $(date -u +%Y-%m-%d)"
           git push
