@@ -1,0 +1,40 @@
+name: Daily Structure Report
+
+on:
+  schedule:
+    # 每週一到五，UTC 21:00 = 台灣時間隔天 05:00
+    # 若要改時間，用 https://crontab.guru 查
+    - cron: "0 21 * * 1-5"
+  workflow_dispatch:  # 允許在網頁手動按一次跑
+
+jobs:
+  run-report:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 允許把報告 commit 回 repo
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run analysis
+        run: |
+          python structure_analysis.py
+
+      - name: Commit and push report
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add latest_report.txt
+          # 若沒有變更就不 commit
+          git diff --staged --quiet || git commit -m "update report $(date -u +%Y-%m-%d)"
+          git push
