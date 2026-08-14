@@ -397,9 +397,13 @@ tr.support td {{
   box-shadow: inset 4px 0 0 #58a6ff;
 }}
 tr.suggest td {{
-  background: #161b22; color: #9ecbff; font-size: 0.62rem;
-  padding-top: 2px; padding-bottom: 6px;
-  border-bottom: 1px solid #3a3f4a; white-space: normal;
+  background: #161b22;
+  color: #9ecbff;
+  font-size: 11px;
+  padding-top: 2px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #3a3f4a;
+  white-space: normal;
   line-height: 1.3;
 }}
 .footer {{ margin-top: 20px; color: #6b7280; font-size: 0.75rem; }}
