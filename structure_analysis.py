@@ -351,9 +351,10 @@ def main():
     print(f"\n已存檔: {fname}")
     print(f"路徑: {os.path.abspath(fname)}")
 
-	out_name = "latest_report.txt"
-	with open(out_name, "w", encoding="utf-8") as f:
-    f.write("\n".join(lines))
+    out_name = "latest_report.txt"
+    with open(out_name, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print(f"\n已寫入: {out_name}")
 
 if __name__ == "__main__":
     main()
