@@ -342,12 +342,18 @@ def build_html(results, now_str):
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
 <title>結構分析報告</title>
 <style>
+html {{
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}}
 body {{
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   margin: 12px; background: #0f1115; color: #e8eaed;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }}
 h1 {{ font-size: 1.25rem; margin: 0 0 4px; }}
 .meta {{ color: #9aa0a6; font-size: 0.85rem; margin-bottom: 12px; }}
@@ -367,14 +373,15 @@ h2 {{
 .wrap {{ overflow-x: auto; -webkit-overflow-scrolling: touch; }}
 table {{
   border-collapse: collapse; width: 100%;
-  min-width: 720px; font-size: 0.85rem;
+  min-width: 720px; font-size: 13px;
+  -webkit-text-size-adjust: 100%;
 }}
 th, td {{
   border-bottom: 1px solid #2a2f3a; padding: 8px 6px; text-align: left;
 }}
 th {{
   color: #9aa0a6; font-weight: 600; position: sticky; top: 0;
-  background: #0f1115; white-space: nowrap;
+  background: #0f1115; white-space: nowrap; font-size: 13px;
 }}
 td.num {{
   font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap;
@@ -397,16 +404,19 @@ tr.support td {{
   box-shadow: inset 4px 0 0 #58a6ff;
 }}
 tr.suggest td {{
-  background: #161b22;
+  background: #161b22 !important;
   color: #9ecbff;
-  font-size: 11px;
+  font-size: 11px !important;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
   padding-top: 2px;
   padding-bottom: 6px;
   border-bottom: 1px solid #3a3f4a;
   white-space: normal;
   line-height: 1.3;
+  font-weight: 400;
 }}
-.footer {{ margin-top: 20px; color: #6b7280; font-size: 0.75rem; }}
+.footer {{ margin-top: 20px; color: #6b7280; font-size: 12px; }}
 </style>
 </head>
 <body>
