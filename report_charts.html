@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
-<title>結構分析報告</title>
+<title>結構分析報告（圖表版）</title>
 <style>
 html {
   -webkit-text-size-adjust: 100%;
@@ -17,6 +17,10 @@ body {
 }
 h1 { font-size: 1.25rem; margin: 0 0 4px; }
 .meta { color: #9aa0a6; font-size: 0.85rem; margin-bottom: 12px; }
+.badge {
+  display: inline-block; background: #293040; color: #9ecbff;
+  font-size: 0.75rem; padding: 2px 8px; border-radius: 6px; margin-left: 6px;
+}
 h2 {
   font-size: 1.05rem; margin: 20px 0 8px;
   border-bottom: 1px solid #333; padding-bottom: 4px;
@@ -77,17 +81,22 @@ tr.suggest td {
   font-weight: 400;
 }
 .footer { margin-top: 20px; color: #6b7280; font-size: 12px; }
+.note {
+  background: #1a2332; border-left: 3px solid #58a6ff;
+  padding: 8px 10px; margin: 12px 0; font-size: 0.8rem; color: #b0c4de;
+}
 </style>
 </head>
 <body>
-<h1>關鍵位 + 布林結構分析</h1>
-<div class="meta">產生時間：2026-08-15 23:16（台灣時間） · 共 26 檔</div>
+<h1>關鍵位 + 布林結構分析 <span class="badge">圖表版</span></h1>
+<div class="meta">產生時間：2026-08-15 23:16（台灣時間） · 共 24 檔</div>
+<div class="note">此為第二版報告（report_charts.html）。目前邏輯與原版相同；之後可在此版加入 K 線圖，不影響 report.html。</div>
 
 <h2>摘要</h2>
 <div class="summary">
-  <span>突破5日高：AMD, MXL</span>
+  <span>突破5日高：AMD</span>
   <span>跌破5日低：AMZN, AVGO</span>
-  <span>布林上軌：MRVL, MXL, HPE, ANET, DELL, IBM, INTC, MSFT, MU, NET, NOW, NVDA, ORCL, PLTR, SNOW, TSM, QQQM</span>
+  <span>布林上軌：ANET, DELL, IBM, INTC, MRVL, MSFT, MU, NET, NOW, NVDA, ORCL, PLTR, SNOW, TSM, QQQM, HPE</span>
   <span>布林下軌：AAPL, CSCO</span>
 </div>
 <div class="legend">
@@ -104,52 +113,7 @@ tr.suggest td {
 <th>代號</th><th>現價</th><th>狀態</th><th>支撐</th><th>壓力</th><th>布林</th><th>歷史勝率</th>
 </tr></thead>
 <tbody>
-<tr class="up">
-            <td><b>AMD</b></td>
-            <td class="num">514.39</td>
-            <td>突破5日高</td>
-            <td class="num">498.15</td>
-            <td class="num">514.67</td>
-            <td>中軌附近</td>
-            <td class="stat">近壓力 → 1d:53%/+0.5% · 3d:60%/+1.9% · 5d:55%/+3.1%</td>
-            </tr>
-            <tr class="suggest"><td colspan="7">↳ 建議：偏強｜回測 498.15–514.39 可考慮接｜停損 &lt;493.17｜目標 514.67</td></tr><tr class="support">
-            <td><b>GOOG</b></td>
-            <td class="num">343.54</td>
-            <td>靠近支撐</td>
-            <td class="num">341.12</td>
-            <td class="num">355.93</td>
-            <td>中軌附近</td>
-            <td class="stat">近支撐 → 1d:42%/-0.0% · 3d:52%/+0.1% · 5d:58%/+0.5%</td>
-            </tr>
-            <tr class="suggest"><td colspan="7">↳ 建議：偏支撐區｜進 341.12–346.24｜停損 &lt;337.71｜目標 348.53 / 355.93</td></tr><tr class="resist">
-            <td><b>MRVL</b></td>
-            <td class="num">222.02</td>
-            <td>靠近壓力</td>
-            <td class="num">206.43</td>
-            <td class="num">222.67</td>
-            <td>偏上軌</td>
-            <td class="stat">近壓力 → 1d:53%/+0.2% · 3d:59%/+0.8% · 5d:60%/+2.4%</td>
-            </tr>
-            <tr class="suggest"><td colspan="7">↳ 建議：接近壓力，慎追高｜減碼/出場參考 220.44–222.67｜未突破不追｜回落看 214.55</td></tr><tr class="up">
-            <td><b>MXL</b></td>
-            <td class="num">84.84</td>
-            <td>突破5日高</td>
-            <td class="num">84.16</td>
-            <td class="num">85.00</td>
-            <td>偏上軌</td>
-            <td class="stat"></td>
-            </tr>
-            <tr class="suggest"><td colspan="7">↳ 建議：偏強｜回測 84.16–84.84 可考慮接｜停損 &lt;83.32｜目標 85.00</td></tr><tr class="resist">
-            <td><b>FIG</b></td>
-            <td class="num">25.42</td>
-            <td>靠近壓力</td>
-            <td class="num">22.80</td>
-            <td class="num">25.56</td>
-            <td>中軌附近</td>
-            <td class="stat">近壓力 → 1d:45%/+1.1% · 3d:50%/+1.1% · 5d:50%/-0.3%</td>
-            </tr>
-            <tr class="suggest"><td colspan="7">↳ 建議：接近壓力，慎追高｜減碼/出場參考 25.30–25.56｜未突破不追｜回落看 24.18</td></tr><tr class="resist">
+<tr class="resist">
             <td><b>AAPL</b></td>
             <td class="num">305.93</td>
             <td>靠近壓力</td>
@@ -158,7 +122,16 @@ tr.suggest td {
             <td>偏下軌</td>
             <td class="stat"></td>
             </tr>
-            <tr class="suggest"><td colspan="7">↳ 建議：偏支撐區｜進 304.76–309.33｜停損 &lt;301.71｜目標 307.36 / 309.97</td></tr><tr class="down">
+            <tr class="suggest"><td colspan="7">↳ 建議：偏支撐區｜進 304.76–309.33｜停損 &lt;301.71｜目標 307.36 / 309.97</td></tr><tr class="up">
+            <td><b>AMD</b></td>
+            <td class="num">514.39</td>
+            <td>突破5日高</td>
+            <td class="num">498.15</td>
+            <td class="num">514.67</td>
+            <td>中軌附近</td>
+            <td class="stat">近壓力 → 1d:53%/+0.5% · 3d:60%/+1.9% · 5d:55%/+3.1%</td>
+            </tr>
+            <tr class="suggest"><td colspan="7">↳ 建議：偏強｜回測 498.15–514.39 可考慮接｜停損 &lt;493.17｜目標 514.67</td></tr><tr class="down">
             <td><b>AMZN</b></td>
             <td class="num">262.65</td>
             <td>跌破5日低</td>
@@ -185,7 +158,16 @@ tr.suggest td {
             <td>偏下軌</td>
             <td class="stat">近支撐 → 1d:56%/+0.3% · 3d:65%/+1.1% · 5d:66%/+1.5%</td>
             </tr>
-            <tr class="suggest"><td colspan="7">↳ 建議：偏支撐區｜進 111.48–113.16｜停損 &lt;110.37｜目標 114.38 / 117.28</td></tr><tr class="resist">
+            <tr class="suggest"><td colspan="7">↳ 建議：偏支撐區｜進 111.48–113.16｜停損 &lt;110.37｜目標 114.38 / 117.28</td></tr><tr class="support">
+            <td><b>GOOGL</b></td>
+            <td class="num">345.90</td>
+            <td>靠近支撐</td>
+            <td class="num">341.36</td>
+            <td class="num">357.61</td>
+            <td>中軌附近</td>
+            <td class="stat">近支撐 → 1d:44%/+0.0% · 3d:53%/+0.3% · 5d:58%/+0.6%</td>
+            </tr>
+            <tr class="suggest"><td colspan="7">↳ 建議：偏支撐區｜進 341.36–346.48｜停損 &lt;337.95｜目標 349.48 / 357.61</td></tr><tr class="resist">
             <td><b>IBM</b></td>
             <td class="num">234.32</td>
             <td>靠近壓力</td>
@@ -203,7 +185,16 @@ tr.suggest td {
             <td>偏上軌</td>
             <td class="stat">近壓力 → 1d:44%/-0.3% · 3d:57%/+1.2% · 5d:56%/+2.1%</td>
             </tr>
-            <tr class="suggest"><td colspan="7">↳ 建議：接近壓力，慎追高｜減碼/出場參考 102.62–103.66｜未突破不追｜回落看 101.00</td></tr><tr class="support">
+            <tr class="suggest"><td colspan="7">↳ 建議：接近壓力，慎追高｜減碼/出場參考 102.62–103.66｜未突破不追｜回落看 101.00</td></tr><tr class="resist">
+            <td><b>MRVL</b></td>
+            <td class="num">222.02</td>
+            <td>靠近壓力</td>
+            <td class="num">206.43</td>
+            <td class="num">222.67</td>
+            <td>偏上軌</td>
+            <td class="stat">近壓力 → 1d:53%/+0.2% · 3d:59%/+0.8% · 5d:60%/+2.4%</td>
+            </tr>
+            <tr class="suggest"><td colspan="7">↳ 建議：接近壓力，慎追高｜減碼/出場參考 220.44–222.67｜未突破不追｜回落看 214.55</td></tr><tr class="support">
             <td><b>MSFT</b></td>
             <td class="num">495.40</td>
             <td>靠近支撐</td>
@@ -306,79 +297,7 @@ tr.suggest td {
 <th>通道</th><th>狀態</th><th>布林</th><th>量能</th>
 </tr></thead>
 <tbody>
-<tr class="up">
-            <td><b>AMD</b></td>
-            <td class="num">514.39</td>
-            <td class="num">498.15</td>
-            <td class="num">+3.2%</td>
-            <td class="num">514.67</td>
-            <td class="num">+0.1%</td>
-            <td>橫盤</td>
-            <td>突破5日高</td>
-            <td>中軌附近</td>
-            <td>普通0.8x</td>
-            </tr>
-            <tr class="suggest"><td colspan="10">↳ 建議：偏強｜回測 498.15–514.39 可考慮接｜停損 &lt;493.17｜目標 514.67</td></tr><tr class="support">
-            <td><b>GOOG</b></td>
-            <td class="num">343.54</td>
-            <td class="num">341.12</td>
-            <td class="num">+0.7%</td>
-            <td class="num">355.93</td>
-            <td class="num">+3.6%</td>
-            <td>下降</td>
-            <td>靠近支撐</td>
-            <td>中軌附近</td>
-            <td>普通0.8x</td>
-            </tr>
-            <tr class="suggest"><td colspan="10">↳ 建議：偏支撐區｜進 341.12–346.24｜停損 &lt;337.71｜目標 348.53 / 355.93</td></tr><tr class="resist">
-            <td><b>MRVL</b></td>
-            <td class="num">222.02</td>
-            <td class="num">206.43</td>
-            <td class="num">+7.0%</td>
-            <td class="num">222.67</td>
-            <td class="num">+0.3%</td>
-            <td>上升</td>
-            <td>靠近壓力</td>
-            <td>偏上軌</td>
-            <td>普通1.0x</td>
-            </tr>
-            <tr class="suggest"><td colspan="10">↳ 建議：接近壓力，慎追高｜減碼/出場參考 220.44–222.67｜未突破不追｜回落看 214.55</td></tr><tr class="up">
-            <td><b>MXL</b></td>
-            <td class="num">84.84</td>
-            <td class="num">84.16</td>
-            <td class="num">+0.8%</td>
-            <td class="num">85.00</td>
-            <td class="num">+0.2%</td>
-            <td>上升</td>
-            <td>突破5日高</td>
-            <td>偏上軌</td>
-            <td>普通1.0x</td>
-            </tr>
-            <tr class="suggest"><td colspan="10">↳ 建議：偏強｜回測 84.16–84.84 可考慮接｜停損 &lt;83.32｜目標 85.00</td></tr><tr class="">
-            <td><b>HPE</b></td>
-            <td class="num">58.71</td>
-            <td class="num">52.61</td>
-            <td class="num">+10.4%</td>
-            <td class="num">63.44</td>
-            <td class="num">+8.1%</td>
-            <td>上升</td>
-            <td>中段</td>
-            <td>偏上軌</td>
-            <td>普通1.1x</td>
-            </tr>
-            <tr class="suggest"><td colspan="10">↳ 建議：接近壓力，慎追高｜減碼/出場參考 62.81–63.44｜未突破不追｜回落看 58.02</td></tr><tr class="resist">
-            <td><b>FIG</b></td>
-            <td class="num">25.42</td>
-            <td class="num">22.80</td>
-            <td class="num">+10.3%</td>
-            <td class="num">25.56</td>
-            <td class="num">+0.5%</td>
-            <td>橫盤</td>
-            <td>靠近壓力</td>
-            <td>中軌附近</td>
-            <td>縮量0.6x</td>
-            </tr>
-            <tr class="suggest"><td colspan="10">↳ 建議：接近壓力，慎追高｜減碼/出場參考 25.30–25.56｜未突破不追｜回落看 24.18</td></tr><tr class="resist">
+<tr class="resist">
             <td><b>AAPL</b></td>
             <td class="num">305.93</td>
             <td class="num">304.76</td>
@@ -390,7 +309,19 @@ tr.suggest td {
             <td>偏下軌</td>
             <td>普通0.8x</td>
             </tr>
-            <tr class="suggest"><td colspan="10">↳ 建議：偏支撐區｜進 304.76–309.33｜停損 &lt;301.71｜目標 307.36 / 309.97</td></tr><tr class="down">
+            <tr class="suggest"><td colspan="10">↳ 建議：偏支撐區｜進 304.76–309.33｜停損 &lt;301.71｜目標 307.36 / 309.97</td></tr><tr class="up">
+            <td><b>AMD</b></td>
+            <td class="num">514.39</td>
+            <td class="num">498.15</td>
+            <td class="num">+3.2%</td>
+            <td class="num">514.67</td>
+            <td class="num">+0.1%</td>
+            <td>橫盤</td>
+            <td>突破5日高</td>
+            <td>中軌附近</td>
+            <td>普通0.8x</td>
+            </tr>
+            <tr class="suggest"><td colspan="10">↳ 建議：偏強｜回測 498.15–514.39 可考慮接｜停損 &lt;493.17｜目標 514.67</td></tr><tr class="down">
             <td><b>AMZN</b></td>
             <td class="num">262.65</td>
             <td class="num">262.42</td>
@@ -450,7 +381,19 @@ tr.suggest td {
             <td>偏上軌</td>
             <td>普通1.0x</td>
             </tr>
-            <tr class="suggest"><td colspan="10">↳ 建議：接近壓力，慎追高｜減碼/出場參考 508.86–514.00｜未突破不追｜回落看 472.51</td></tr><tr class="resist">
+            <tr class="suggest"><td colspan="10">↳ 建議：接近壓力，慎追高｜減碼/出場參考 508.86–514.00｜未突破不追｜回落看 472.51</td></tr><tr class="support">
+            <td><b>GOOGL</b></td>
+            <td class="num">345.90</td>
+            <td class="num">341.36</td>
+            <td class="num">+1.3%</td>
+            <td class="num">357.61</td>
+            <td class="num">+3.4%</td>
+            <td>下降</td>
+            <td>靠近支撐</td>
+            <td>中軌附近</td>
+            <td>普通0.7x</td>
+            </tr>
+            <tr class="suggest"><td colspan="10">↳ 建議：偏支撐區｜進 341.36–346.48｜停損 &lt;337.95｜目標 349.48 / 357.61</td></tr><tr class="resist">
             <td><b>IBM</b></td>
             <td class="num">234.32</td>
             <td class="num">231.68</td>
@@ -474,7 +417,19 @@ tr.suggest td {
             <td>偏上軌</td>
             <td>普通1.1x</td>
             </tr>
-            <tr class="suggest"><td colspan="10">↳ 建議：接近壓力，慎追高｜減碼/出場參考 102.62–103.66｜未突破不追｜回落看 101.00</td></tr><tr class="support">
+            <tr class="suggest"><td colspan="10">↳ 建議：接近壓力，慎追高｜減碼/出場參考 102.62–103.66｜未突破不追｜回落看 101.00</td></tr><tr class="resist">
+            <td><b>MRVL</b></td>
+            <td class="num">222.02</td>
+            <td class="num">206.43</td>
+            <td class="num">+7.0%</td>
+            <td class="num">222.67</td>
+            <td class="num">+0.3%</td>
+            <td>上升</td>
+            <td>靠近壓力</td>
+            <td>偏上軌</td>
+            <td>普通1.0x</td>
+            </tr>
+            <tr class="suggest"><td colspan="10">↳ 建議：接近壓力，慎追高｜減碼/出場參考 220.44–222.67｜未突破不追｜回落看 214.55</td></tr><tr class="support">
             <td><b>MSFT</b></td>
             <td class="num">495.40</td>
             <td class="num">491.52</td>
@@ -618,13 +573,25 @@ tr.suggest td {
             <td>偏上軌</td>
             <td>縮量0.6x</td>
             </tr>
-            <tr class="suggest"><td colspan="10">↳ 建議：接近壓力，慎追高｜減碼/出場參考 299.33–302.35｜未突破不追｜回落看 299.41</td></tr>
+            <tr class="suggest"><td colspan="10">↳ 建議：接近壓力，慎追高｜減碼/出場參考 299.33–302.35｜未突破不追｜回落看 299.41</td></tr><tr class="">
+            <td><b>HPE</b></td>
+            <td class="num">58.71</td>
+            <td class="num">52.61</td>
+            <td class="num">+10.4%</td>
+            <td class="num">63.44</td>
+            <td class="num">+8.1%</td>
+            <td>上升</td>
+            <td>中段</td>
+            <td>偏上軌</td>
+            <td>普通1.1x</td>
+            </tr>
+            <tr class="suggest"><td colspan="10">↳ 建議：接近壓力，慎追高｜減碼/出場參考 62.81–63.44｜未突破不追｜回落看 58.02</td></tr>
 </tbody>
 </table>
 </div>
 
 <div class="footer">
-資料來源 yfinance · 建議依支撐/壓力/布林自動產生，僅供參考，非投資建議
+資料來源 yfinance · 建議依支撐/壓力/布林自動產生，僅供參考，非投資建議 · 圖表版
 </div>
 </body>
 </html>
