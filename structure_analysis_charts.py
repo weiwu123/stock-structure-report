@@ -1,8 +1,16 @@
-import yfinance as yf
-import numpy as np
-from datetime import datetime
-import pytz
+import io
+import base64
 import html
+from datetime import datetime
+
+import numpy as np
+import pytz
+import yfinance as yf
+
+import matplotlib
+
+matplotlib.use("Agg")
+import mplfinance as mpf
 
 CORE_LIST = [
     "AAPL", "AMD", "AMZN", "ANET", "AVGO", "CSCO", "DELL", "GOOGL",
@@ -16,6 +24,7 @@ BB_PERIOD = 20
 BB_STD = 2.0
 NEAR_PCT = 3.0
 FORWARD_LIST = [1, 3, 5]
+CHART_DAYS = 80
 
 
 def get_history(ticker, days=320):
@@ -153,32 +162,80 @@ def make_suggestion(r):
     mid = (sup + res) / 2
 
     if event == "跌破5日低":
-        return (
-            f"建議：偏弱，先觀望｜等站回 {sup:.2f}–{entry_hi:.2f} 再考慮｜未站回不追"
-        )
-
+        return f"建議：偏弱，先觀望｜等站回 {sup:.2f}–{entry_hi:.2f} 再考慮｜未站回不追"
     if event == "突破5日高":
         return (
             f"建議：偏強｜回測 {sup:.2f}–{px:.2f} 可考慮接｜"
             f"停損 <{stop:.2f}｜目標 {res:.2f}"
         )
-
     if event == "靠近支撐" or "下軌" in bb:
         return (
             f"建議：偏支撐區｜進 {entry_lo:.2f}–{entry_hi:.2f}｜"
             f"停損 <{stop:.2f}｜目標 {mid:.2f} / {res:.2f}"
         )
-
     if event == "靠近壓力" or "上軌" in bb:
         return (
             f"建議：接近壓力，慎追高｜減碼/出場參考 {res * 0.99:.2f}–{res:.2f}｜"
             f"未突破不追｜回落看 {mid:.2f}"
         )
-
     return (
         f"建議：區間中段，等邊緣｜偏多等 {entry_lo:.2f}–{entry_hi:.2f}｜"
         f"偏出看 {res * 0.99:.2f}–{res:.2f}"
     )
+
+
+def make_chart_base64(hist, support, resist, ticker):
+    """近 CHART_DAYS 日 K 線 + 支撐/壓力水平線，回傳 base64 PNG"""
+    try:
+        df = hist.tail(CHART_DAYS).copy()
+        df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
+        if len(df) < 10:
+            return None
+
+        buf = io.BytesIO()
+        mc = mpf.make_marketcolors(
+            up="#3dd68c",
+            down="#ff6b6b",
+            edge="inherit",
+            wick="inherit",
+            volume="in",
+        )
+        style = mpf.make_mpf_style(
+            base_mpf_style="nightclouds",
+            marketcolors=mc,
+            facecolor="#0f1115",
+            edgecolor="#0f1115",
+            figcolor="#0f1115",
+            gridcolor="#2a2f3a",
+            gridstyle="--",
+        )
+
+        hlines = dict(
+            hlines=[support, resist],
+            colors=["#58a6ff", "#f0c14b"],
+            linestyle="-.",
+            linewidths=(1.2, 1.2),
+            alpha=0.95,
+        )
+
+        mpf.plot(
+            df,
+            type="candle",
+            style=style,
+            volume=True,
+            hlines=hlines,
+            title=f"{ticker}  |  藍=支撐  黃=壓力",
+            ylabel="Price",
+            ylabel_lower="Vol",
+            savefig=dict(fname=buf, dpi=110, bbox_inches="tight", facecolor="#0f1115"),
+            tight_layout=True,
+            update_width_config=dict(candle_linewidth=0.8),
+        )
+        buf.seek(0)
+        return base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception as e:
+        print(f"chart error {ticker}: {e}")
+        return None
 
 
 def analyze(ticker, hist):
@@ -250,9 +307,6 @@ def analyze(ticker, hist):
         "channel": channel,
         "event": event,
         "vol_desc": vol_desc,
-        "bb_u": bb_u,
-        "bb_m": bb_m,
-        "bb_l": bb_l,
         "bb_label": bb_label,
         "bb_pct": bb_pct,
         "breakout": breakout,
@@ -261,6 +315,7 @@ def analyze(ticker, hist):
         "near_res": near_res,
         "stats": stats,
         "side": side,
+        "hist": hist,
     }
     r["suggestion"] = make_suggestion(r)
     return r
@@ -289,6 +344,11 @@ def build_html(results, now_str):
         if r["near_sup"] or r["near_res"] or r["breakout"] or r["breakdown"]
     ]
 
+    # 只為需關注畫圖
+    for r in focus:
+        print(f"chart {r['ticker']} ...")
+        r["chart"] = make_chart_base64(r["hist"], r["support"], r["resist"], r["ticker"])
+
     rows = []
     for r in results:
         cls = event_class(r["event"])
@@ -308,33 +368,50 @@ def build_html(results, now_str):
             <tr class="suggest"><td colspan="10">↳ {html.escape(r.get('suggestion', ''))}</td></tr>"""
         )
 
-    focus_rows = []
-    for r in focus:
-        stat = ""
-        if r["stats"] and r["side"]:
-            parts = []
-            for d in FORWARD_LIST:
-                s = r["stats"].get(d)
-                if s:
-                    parts.append(f"{d}d:{s['winrate']:.0f}%/{s['avg']:+.1f}%")
-            if parts:
-                stat = f"{r['side']} → " + " · ".join(parts)
-        focus_rows.append(
-            f"""<tr class="{event_class(r['event'])}">
-            <td><b>{html.escape(r['ticker'])}</b></td>
-            <td class="num">{r['price']:.2f}</td>
-            <td>{html.escape(r['event'])}</td>
-            <td class="num">{r['support']:.2f}</td>
-            <td class="num">{r['resist']:.2f}</td>
-            <td>{html.escape(r['bb_label'])}</td>
-            <td class="stat">{html.escape(stat)}</td>
-            </tr>
-            <tr class="suggest"><td colspan="7">↳ {html.escape(r.get('suggestion', ''))}</td></tr>"""
-        )
+    focus_blocks = []
+    if not focus:
+        focus_blocks.append("<p>無</p>")
+    else:
+        for r in focus:
+            stat = ""
+            if r["stats"] and r["side"]:
+                parts = []
+                for d in FORWARD_LIST:
+                    s = r["stats"].get(d)
+                    if s:
+                        parts.append(f"{d}d:{s['winrate']:.0f}%/{s['avg']:+.1f}%")
+                if parts:
+                    stat = f"{r['side']} → " + " · ".join(parts)
 
-    focus_body = (
-        "".join(focus_rows) if focus_rows else '<tr><td colspan="7">無</td></tr>'
-    )
+            chart_html = ""
+            if r.get("chart"):
+                chart_html = (
+                    f'<div class="chart">'
+                    f'<img src="data:image/png;base64,{r["chart"]}" '
+                    f'alt="{html.escape(r["ticker"])} chart"/></div>'
+                )
+            else:
+                chart_html = '<div class="chart miss">（圖表產生失敗）</div>'
+
+            focus_blocks.append(
+                f"""
+<div class="card">
+  <div class="card-h">
+    <b>{html.escape(r['ticker'])}</b>
+    <span class="tag {event_class(r['event'])}">{html.escape(r['event'])}</span>
+    <span class="px">{r['price']:.2f}</span>
+  </div>
+  <div class="card-m">
+    支撐 {r['support']:.2f}（{r['dist_sup']:+.1f}%） ·
+    壓力 {r['resist']:.2f}（{r['dist_res']:+.1f}%） ·
+    {html.escape(r['bb_label'])} · {html.escape(r['channel'])} · {html.escape(r['vol_desc'])}
+  </div>
+  {chart_html}
+  <div class="sug">↳ {html.escape(r.get('suggestion', ''))}</div>
+  <div class="stat">{html.escape(stat) if stat else ''}</div>
+</div>
+"""
+            )
 
     return f"""<!DOCTYPE html>
 <html lang="zh-Hant">
@@ -343,22 +420,20 @@ def build_html(results, now_str):
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
 <title>結構分析報告（圖表版）</title>
 <style>
-html {{
+html, body {{
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }}
 body {{
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   margin: 12px; background: #0f1115; color: #e8eaed;
-  -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%;
 }}
 h1 {{ font-size: 1.25rem; margin: 0 0 4px; }}
-.meta {{ color: #9aa0a6; font-size: 0.85rem; margin-bottom: 12px; }}
 .badge {{
   display: inline-block; background: #293040; color: #9ecbff;
   font-size: 0.75rem; padding: 2px 8px; border-radius: 6px; margin-left: 6px;
 }}
+.meta {{ color: #9aa0a6; font-size: 0.85rem; margin-bottom: 12px; }}
 h2 {{
   font-size: 1.05rem; margin: 20px 0 8px;
   border-bottom: 1px solid #333; padding-bottom: 4px;
@@ -372,63 +447,57 @@ h2 {{
   display: inline-block; width: 10px; height: 10px;
   border-radius: 2px; margin: 0 4px 0 10px; vertical-align: middle;
 }}
+.card {{
+  background: #161b22; border: 1px solid #2a2f3a; border-radius: 10px;
+  padding: 10px; margin: 0 0 14px;
+}}
+.card-h {{ display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 4px; }}
+.card-h .px {{ margin-left: auto; font-variant-numeric: tabular-nums; }}
+.tag {{
+  font-size: 0.75rem; padding: 2px 8px; border-radius: 6px; background: #2a2f3a;
+}}
+.tag.up {{ background: #0d3d1a; color: #3dd68c; }}
+.tag.down {{ background: #4a1515; color: #ff6b6b; }}
+.tag.resist {{ background: #3d3010; color: #f0c14b; }}
+.tag.support {{ background: #0d2a4a; color: #58a6ff; }}
+.card-m {{ color: #9aa0a6; font-size: 0.8rem; margin-bottom: 8px; }}
+.chart {{ margin: 8px 0; }}
+.chart img {{
+  width: 100%; max-width: 900px; height: auto;
+  border-radius: 8px; display: block; background: #0f1115;
+}}
+.chart.miss {{ color: #6b7280; font-size: 0.8rem; }}
+.sug {{
+  color: #9ecbff; font-size: 11px; line-height: 1.35; margin-top: 6px;
+  -webkit-text-size-adjust: 100%;
+}}
+.stat {{ color: #8b949e; font-size: 11px; margin-top: 4px; }}
 .wrap {{ overflow-x: auto; -webkit-overflow-scrolling: touch; }}
 table {{
   border-collapse: collapse; width: 100%;
   min-width: 720px; font-size: 13px;
-  -webkit-text-size-adjust: 100%;
 }}
-th, td {{
-  border-bottom: 1px solid #2a2f3a; padding: 8px 6px; text-align: left;
-}}
+th, td {{ border-bottom: 1px solid #2a2f3a; padding: 8px 6px; text-align: left; }}
 th {{
   color: #9aa0a6; font-weight: 600; position: sticky; top: 0;
   background: #0f1115; white-space: nowrap; font-size: 13px;
 }}
-td.num {{
-  font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap;
-}}
-td.stat {{ white-space: normal; min-width: 140px; color: #bdc1c6; }}
-tr.up td {{
-  background: #0d3d1a !important;
-  box-shadow: inset 4px 0 0 #3dd68c;
-}}
-tr.down td {{
-  background: #4a1515 !important;
-  box-shadow: inset 4px 0 0 #ff6b6b;
-}}
-tr.resist td {{
-  background: #3d3010 !important;
-  box-shadow: inset 4px 0 0 #f0c14b;
-}}
-tr.support td {{
-  background: #0d2a4a !important;
-  box-shadow: inset 4px 0 0 #58a6ff;
-}}
+td.num {{ font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }}
+tr.up td {{ background: #0d3d1a !important; box-shadow: inset 4px 0 0 #3dd68c; }}
+tr.down td {{ background: #4a1515 !important; box-shadow: inset 4px 0 0 #ff6b6b; }}
+tr.resist td {{ background: #3d3010 !important; box-shadow: inset 4px 0 0 #f0c14b; }}
+tr.support td {{ background: #0d2a4a !important; box-shadow: inset 4px 0 0 #58a6ff; }}
 tr.suggest td {{
-  background: #161b22 !important;
-  color: #9ecbff;
-  font-size: 11px !important;
-  -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%;
-  padding-top: 2px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid #3a3f4a;
-  white-space: normal;
-  line-height: 1.3;
-  font-weight: 400;
+  background: #161b22 !important; color: #9ecbff;
+  font-size: 11px !important; padding-top: 2px; padding-bottom: 6px;
+  border-bottom: 1px solid #3a3f4a; white-space: normal; line-height: 1.3;
 }}
 .footer {{ margin-top: 20px; color: #6b7280; font-size: 12px; }}
-.note {{
-  background: #1a2332; border-left: 3px solid #58a6ff;
-  padding: 8px 10px; margin: 12px 0; font-size: 0.8rem; color: #b0c4de;
-}}
 </style>
 </head>
 <body>
-<h1>關鍵位 + 布林結構分析 <span class="badge">圖表版</span></h1>
-<div class="meta">產生時間：{html.escape(now_str)}（台灣時間） · 共 {len(results)} 檔</div>
-<div class="note">此為第二版報告（report_charts.html）。目前邏輯與原版相同；之後可在此版加入 K 線圖，不影響 report.html。</div>
+<h1>關鍵位 + 布林 <span class="badge">圖表版 K線</span></h1>
+<div class="meta">產生時間：{html.escape(now_str)}（台灣時間） · 共 {len(results)} 檔 · 僅「需關注」附 K 線</div>
 
 <h2>摘要</h2>
 <div class="summary">
@@ -440,21 +509,12 @@ tr.suggest td {{
 <div class="legend">
   <i style="background:#3dd68c;margin-left:0"></i>突破
   <i style="background:#ff6b6b"></i>跌破
-  <i style="background:#f0c14b"></i>靠近壓力
-  <i style="background:#58a6ff"></i>靠近支撐
+  <i style="background:#f0c14b"></i>靠近壓力／圖上壓力線
+  <i style="background:#58a6ff"></i>靠近支撐／圖上支撐線
 </div>
 
-<h2>需關注</h2>
-<div class="wrap">
-<table>
-<thead><tr>
-<th>代號</th><th>現價</th><th>狀態</th><th>支撐</th><th>壓力</th><th>布林</th><th>歷史勝率</th>
-</tr></thead>
-<tbody>
-{focus_body}
-</tbody>
-</table>
-</div>
+<h2>需關注（含 K 線）</h2>
+{''.join(focus_blocks)}
 
 <h2>全部清單</h2>
 <div class="wrap">
@@ -470,7 +530,7 @@ tr.suggest td {{
 </div>
 
 <div class="footer">
-資料來源 yfinance · 建議依支撐/壓力/布林自動產生，僅供參考，非投資建議 · 圖表版
+資料來源 yfinance · K 線僅供結構參考 · 非投資建議 · report_charts.html
 </div>
 </body>
 </html>
