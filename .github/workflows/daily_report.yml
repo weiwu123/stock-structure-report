@@ -2,8 +2,7 @@ name: Daily Structure Report
 
 on:
   schedule:
-    # 台灣時間 08:02（週二～週六）＝ 對應美股週一～週五盤後結束後
-    # UTC 00:02，週一到週五
+    # 台灣時間約 08:02（週二～週六）＝美股週一～週五盤後
     - cron: "2 0 * * 1-5"
   workflow_dispatch:
 
@@ -11,7 +10,7 @@ jobs:
   run-report:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # 允許把報告 commit 回 repo
+      contents: write
 
     steps:
       - name: Checkout
@@ -24,17 +23,26 @@ jobs:
 
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run analysis
-        run: |
-          python structure_analysis.py
+      - name: Run original analysis
+        run: python structure_analysis.py
 
-      - name: Commit and push report
+      - name: Run charts-version analysis
+        run: python structure_analysis_charts.py
+
+      - name: Show output files
+        run: ls -la report.html report_charts.html || true
+
+      - name: Commit and push reports
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add report.html
-          # 若沒有變更就不 commit
-          git diff --staged --quiet || git commit -m "update report $(date -u +%Y-%m-%d)"
-          git push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add report.html report_charts.html
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "update reports $(date -u +%Y-%m-%d)"
+            git push
+          fi
