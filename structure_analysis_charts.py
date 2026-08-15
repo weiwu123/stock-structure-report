@@ -225,7 +225,7 @@ def make_chart_base64(hist, support, resist, ticker):
             style=style,
             volume=True,
             hlines=hlines,
-            title=f"{ticker}  |  藍=支撐  黃=壓力",
+            title=f"{ticker}  |  blue=support  yellow=resist",
             ylabel="Price",
             ylabel_lower="Vol",
             savefig=dict(fname=buf, dpi=110, bbox_inches="tight", facecolor="#0f1115"),
