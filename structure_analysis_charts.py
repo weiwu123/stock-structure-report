@@ -186,12 +186,30 @@ def make_suggestion(r):
 
 
 def make_chart_base64(hist, support, resist, ticker):
-    """近 CHART_DAYS 日 K 線 + 支撐/壓力水平線，回傳 base64 PNG"""
+    """近 CHART_DAYS 日 K 線 + 支撐/壓力 + 布林 + MA20/MA200，回傳 base64 PNG（無標題）"""
     try:
+        close_full = hist["Close"]
+
+        # 布林
+        mid_full = close_full.rolling(BB_PERIOD).mean()
+        std_full = close_full.rolling(BB_PERIOD).std()
+        upper_full = mid_full + BB_STD * std_full
+        lower_full = mid_full - BB_STD * std_full
+
+        # 均線
+        ma20_full = close_full.rolling(20).mean()
+        ma200_full = close_full.rolling(200).mean()
+
         df = hist.tail(CHART_DAYS).copy()
         df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
         if len(df) < 10:
             return None
+
+        df["bb_u"] = upper_full.reindex(df.index)
+        df["bb_m"] = mid_full.reindex(df.index)
+        df["bb_l"] = lower_full.reindex(df.index)
+        df["ma20"] = ma20_full.reindex(df.index)
+        df["ma200"] = ma200_full.reindex(df.index)
 
         buf = io.BytesIO()
         mc = mpf.make_marketcolors(
@@ -211,27 +229,88 @@ def make_chart_base64(hist, support, resist, ticker):
             gridstyle="--",
         )
 
-        hlines = dict(
-            hlines=[support, resist],
-            colors=["#58a6ff", "#f0c14b"],
-            linestyle="-.",
-            linewidths=(1.2, 1.2),
-            alpha=0.95,
-        )
+        apds = []
+        # 布林：灰
+        if df["bb_u"].notna().sum() > 5:
+            apds.append(
+                mpf.make_addplot(df["bb_u"], color="#8b949e", width=0.75, linestyle="--")
+            )
+            apds.append(
+                mpf.make_addplot(df["bb_m"], color="#6e7681", width=0.75, linestyle=":")
+            )
+            apds.append(
+                mpf.make_addplot(df["bb_l"], color="#8b949e", width=0.75, linestyle="--")
+            )
+        # MA20：淺青
+        if df["ma20"].notna().sum() > 5:
+            apds.append(
+                mpf.make_addplot(df["ma20"], color="#39c5cf", width=1.0)
+            )
+        # MA200：橘粉（長線）
+        if df["ma200"].notna().sum() > 5:
+            apds.append(
+                mpf.make_addplot(df["ma200"], color="#ff7b72", width=1.2)
+            )
 
-        mpf.plot(
-            df,
+        lo = float(df["Low"].min())
+        hi = float(df["High"].max())
+        # 均線若在視窗外，略擴 ylim 以免線被切掉太多
+        extra = []
+        for col in ("ma20", "ma200", "bb_u", "bb_l"):
+            if col in df and df[col].notna().any():
+                extra.append(float(df[col].min()))
+                extra.append(float(df[col].max()))
+        if extra:
+            lo = min(lo, min(extra))
+            hi = max(hi, max(extra))
+
+        pad = (hi - lo) * 0.03 if hi > lo else 1.0
+        y_lo, y_hi = lo - pad, hi + pad
+
+        levels, colors = [], []
+        if y_lo <= support <= y_hi:
+            levels.append(support)
+            colors.append("#58a6ff")
+        if y_lo <= resist <= y_hi:
+            levels.append(resist)
+            colors.append("#f0c14b")
+
+        hlines = None
+        if levels:
+            hlines = dict(
+                hlines=levels,
+                colors=colors,
+                linestyle="-.",
+                linewidths=tuple([1.0] * len(levels)),
+                alpha=0.7,
+            )
+
+        plot_kwargs = dict(
             type="candle",
             style=style,
             volume=True,
-            hlines=hlines,
-            title=ticker,
             ylabel="Price",
             ylabel_lower="Vol",
-            savefig=dict(fname=buf, dpi=110, bbox_inches="tight", facecolor="#0f1115"),
+            figratio=(12, 7),
+            figscale=1.05,
+            savefig=dict(
+                fname=buf,
+                dpi=110,
+                bbox_inches="tight",
+                facecolor="#0f1115",
+                pad_inches=0.2,
+            ),
             tight_layout=True,
             update_width_config=dict(candle_linewidth=0.8),
+            ylim=(y_lo, y_hi),
+            scale_padding=dict(top=0.15, bottom=0.25, left=0.12, right=0.12),
         )
+        if apds:
+            plot_kwargs["addplot"] = apds
+        if hlines:
+            plot_kwargs["hlines"] = hlines
+
+        mpf.plot(df, **plot_kwargs)
         buf.seek(0)
         return base64.b64encode(buf.getvalue()).decode("ascii")
     except Exception as e:
