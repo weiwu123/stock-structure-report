@@ -186,17 +186,14 @@ def make_suggestion(r):
 
 
 def make_chart_base64(hist, support, resist, ticker):
-    """近 CHART_DAYS 日 K 線 + 支撐/壓力 + 布林 + MA20/MA200，回傳 base64 PNG（無標題）"""
+    """K線 + 支撐/壓力 + 布林 + MA20/MA200，無標題"""
     try:
         close_full = hist["Close"]
 
-        # 布林
         mid_full = close_full.rolling(BB_PERIOD).mean()
         std_full = close_full.rolling(BB_PERIOD).std()
         upper_full = mid_full + BB_STD * std_full
         lower_full = mid_full - BB_STD * std_full
-
-        # 均線
         ma20_full = close_full.rolling(20).mean()
         ma200_full = close_full.rolling(200).mean()
 
@@ -230,7 +227,6 @@ def make_chart_base64(hist, support, resist, ticker):
         )
 
         apds = []
-        # 布林：灰
         if df["bb_u"].notna().sum() > 5:
             apds.append(
                 mpf.make_addplot(df["bb_u"], color="#8b949e", width=0.75, linestyle="--")
@@ -241,20 +237,13 @@ def make_chart_base64(hist, support, resist, ticker):
             apds.append(
                 mpf.make_addplot(df["bb_l"], color="#8b949e", width=0.75, linestyle="--")
             )
-        # MA20：淺青
         if df["ma20"].notna().sum() > 5:
-            apds.append(
-                mpf.make_addplot(df["ma20"], color="#39c5cf", width=1.0)
-            )
-        # MA200：橘粉（長線）
+            apds.append(mpf.make_addplot(df["ma20"], color="#39c5cf", width=1.0))
         if df["ma200"].notna().sum() > 5:
-            apds.append(
-                mpf.make_addplot(df["ma200"], color="#ff7b72", width=1.2)
-            )
+            apds.append(mpf.make_addplot(df["ma200"], color="#ff7b72", width=1.2))
 
         lo = float(df["Low"].min())
         hi = float(df["High"].max())
-        # 均線若在視窗外，略擴 ylim 以免線被切掉太多
         extra = []
         for col in ("ma20", "ma200", "bb_u", "bb_l"):
             if col in df and df[col].notna().any():
@@ -273,16 +262,16 @@ def make_chart_base64(hist, support, resist, ticker):
             colors.append("#58a6ff")
         if y_lo <= resist <= y_hi:
             levels.append(resist)
-            colors.append("#f0c14b")
+            colors.append("#ffd666")
 
         hlines = None
         if levels:
             hlines = dict(
                 hlines=levels,
                 colors=colors,
-                linestyle="-.",
-                linewidths=tuple([1.0] * len(levels)),
-                alpha=0.7,
+                linestyle="-",
+                linewidths=tuple([1.8] * len(levels)),
+                alpha=0.95,
             )
 
         plot_kwargs = dict(
@@ -424,7 +413,6 @@ def build_html(results, now_str):
         if r["near_sup"] or r["near_res"] or r["breakout"] or r["breakdown"]
     ]
 
-    # 只為需關注畫圖
     for r in focus:
         print(f"chart {r['ticker']} ...")
         r["chart"] = make_chart_base64(r["hist"], r["support"], r["resist"], r["ticker"])
@@ -463,12 +451,18 @@ def build_html(results, now_str):
                 if parts:
                     stat = f"{r['side']} → " + " · ".join(parts)
 
-            chart_html = ""
             if r.get("chart"):
                 chart_html = (
                     f'<div class="chart">'
                     f'<img src="data:image/png;base64,{r["chart"]}" '
                     f'alt="{html.escape(r["ticker"])} chart"/></div>'
+                    f'<div class="chart-legend">'
+                    f'<span class="lg-sup">━ 支撐</span>'
+                    f'<span class="lg-res">━ 壓力</span>'
+                    f'<span class="lg-bb">┅ 布林</span>'
+                    f'<span class="lg-ma20">━ MA20</span>'
+                    f'<span class="lg-ma200">━ MA200</span>'
+                    f"</div>"
                 )
             else:
                 chart_html = '<div class="chart miss">（圖表產生失敗）</div>'
@@ -538,15 +532,30 @@ h2 {{
 }}
 .tag.up {{ background: #0d3d1a; color: #3dd68c; }}
 .tag.down {{ background: #4a1515; color: #ff6b6b; }}
-.tag.resist {{ background: #3d3010; color: #f0c14b; }}
+.tag.resist {{ background: #3d3010; color: #ffd666; }}
 .tag.support {{ background: #0d2a4a; color: #58a6ff; }}
 .card-m {{ color: #9aa0a6; font-size: 0.8rem; margin-bottom: 8px; }}
-.chart {{ margin: 8px 0; }}
+.chart {{ margin: 8px 0 0; }}
 .chart img {{
   width: 100%; max-width: 900px; height: auto;
   border-radius: 8px; display: block; background: #0f1115;
 }}
 .chart.miss {{ color: #6b7280; font-size: 0.8rem; }}
+.chart-legend {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 6px 0 4px;
+  font-size: 11px;
+  color: #9aa0a6;
+  -webkit-text-size-adjust: 100%;
+}}
+.chart-legend span {{ white-space: nowrap; }}
+.lg-sup {{ color: #58a6ff; font-weight: 600; }}
+.lg-res {{ color: #ffd666; font-weight: 600; }}
+.lg-bb {{ color: #8b949e; }}
+.lg-ma20 {{ color: #39c5cf; }}
+.lg-ma200 {{ color: #ff7b72; }}
 .sug {{
   color: #9ecbff; font-size: 11px; line-height: 1.35; margin-top: 6px;
   -webkit-text-size-adjust: 100%;
@@ -565,7 +574,7 @@ th {{
 td.num {{ font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }}
 tr.up td {{ background: #0d3d1a !important; box-shadow: inset 4px 0 0 #3dd68c; }}
 tr.down td {{ background: #4a1515 !important; box-shadow: inset 4px 0 0 #ff6b6b; }}
-tr.resist td {{ background: #3d3010 !important; box-shadow: inset 4px 0 0 #f0c14b; }}
+tr.resist td {{ background: #3d3010 !important; box-shadow: inset 4px 0 0 #ffd666; }}
 tr.support td {{ background: #0d2a4a !important; box-shadow: inset 4px 0 0 #58a6ff; }}
 tr.suggest td {{
   background: #161b22 !important; color: #9ecbff;
@@ -589,8 +598,11 @@ tr.suggest td {{
 <div class="legend">
   <i style="background:#3dd68c;margin-left:0"></i>突破
   <i style="background:#ff6b6b"></i>跌破
-  <i style="background:#f0c14b"></i>靠近壓力／圖上壓力線
-  <i style="background:#58a6ff"></i>靠近支撐／圖上支撐線
+  <i style="background:#58a6ff"></i>支撐
+  <i style="background:#ffd666"></i>壓力
+  <i style="background:#8b949e"></i>布林
+  <i style="background:#39c5cf"></i>MA20
+  <i style="background:#ff7b72"></i>MA200
 </div>
 
 <h2>需關注（含 K 線）</h2>
