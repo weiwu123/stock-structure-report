@@ -268,10 +268,10 @@ def make_chart_base64(hist, support, resist, ticker):
         if levels:
             hlines = dict(
                 hlines=levels,
-                colors=colors,
-                linestyle="-",
-                linewidths=tuple([1.8] * len(levels)),
-                alpha=0.95,
+                colors=colors,  # 藍 #58a6ff、黃可維持 #f0c14b 或 #ffd666
+                linestyle="-.",   # 點畫線
+                linewidths=tuple([1.2] * len(levels)),
+                alpha=0.9,
             )
 
         plot_kwargs = dict(
