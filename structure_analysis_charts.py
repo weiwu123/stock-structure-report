@@ -13,9 +13,10 @@ matplotlib.use("Agg")
 import mplfinance as mpf
 
 CORE_LIST = [
-    "AAPL", "AMD", "AMZN", "ANET", "AVGO", "CSCO", "DELL", "GOOGL",
-    "IBM", "INTC", "MRVL", "MSFT", "MU", "NET", "NOW", "NVDA",
-    "ORCL", "PLTR", "QCOM", "SNOW", "TSLA", "TSM", "QQQM", "HPE",
+    "AMD", "GOOG", "MRVL", "MXL", "HPE", "FIG",
+    "AAPL", "AMZN", "ANET", "AVGO", "CSCO", "DELL",
+    "IBM", "INTC", "MSFT", "MU", "NET", "NOW", "NVDA",
+    "ORCL", "PLTR", "QCOM", "SNOW", "TSLA", "TSM", "QQQM"
 ]
 
 SHORT_DAYS = 5
