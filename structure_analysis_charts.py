@@ -16,7 +16,7 @@ CORE_LIST = [
     "AMD", "GOOG", "MRVL", "MXL", "HPE", "FIG",
     "AAPL", "AMZN", "ANET", "AVGO", "CSCO", "DELL",
     "IBM", "INTC", "MSFT", "MU", "NET", "NOW", "NVDA",
-    "ORCL", "PLTR", "QCOM", "SNOW", "TSLA", "TSM", "QQQM"
+    "ORCL", "PLTR", "QCOM", "SNOW", "TSLA", "TSM", "QQQM",
 ]
 
 SHORT_DAYS = 5
@@ -25,6 +25,7 @@ BB_PERIOD = 20
 BB_STD = 2.0
 NEAR_PCT = 3.0
 NARROW_PCT = 3.0
+RS_DAYS = 5
 FORWARD_LIST = [1, 3, 5]
 CHART_DAYS = 80
 
@@ -119,6 +120,23 @@ def nearest_levels(price, sh, sl, fb_high, fb_low):
     return float(support), float(resist)
 
 
+def rel_strength_vs_bench(stock_close, bench_close, days=RS_DAYS):
+    """近 N 日報酬差（個股 - 基準），單位 %"""
+    try:
+        s = stock_close.dropna()
+        b = bench_close.dropna()
+        common = s.index.intersection(b.index)
+        if len(common) < days + 1:
+            return None
+        s = s.loc[common]
+        b = b.loc[common]
+        s_ret = float(s.iloc[-1] / s.iloc[-days - 1] - 1) * 100
+        b_ret = float(b.iloc[-1] / b.iloc[-days - 1] - 1) * 100
+        return s_ret - b_ret
+    except Exception:
+        return None
+
+
 def hist_stats(hist, side):
     closes = hist["Close"].values.astype(float)
     highs = hist["High"].values.astype(float)
@@ -163,88 +181,121 @@ def hist_stats(hist, side):
 
 
 def make_ma_note(r):
-    """均線位置文字"""
     parts = []
     if r.get("ma20") is not None:
         pos20 = "上方" if r["price"] >= r["ma20"] else "下方"
-        parts.append(f"MA20 {r['ma20']:.2f}（價格在{pos20}，{r['ma20_slope_lbl']}）")
+        parts.append(f"MA20 {r['ma20']:.2f}（{pos20}，{r['ma20_slope_lbl']}）")
     if r.get("ma200") is not None:
         pos200 = "上方" if r["price"] >= r["ma200"] else "下方"
-        parts.append(f"MA200 {r['ma200']:.2f}（價格在{pos200}，{r['ma200_slope_lbl']}）")
-    if not parts:
-        return "均線資料不足"
-    # 簡單多空濾網描述
-    if r.get("ma200") is not None and r.get("ma20") is not None:
-        if r["price"] >= r["ma200"] and r["price"] >= r["ma20"]:
-            parts.append("濾網：偏多（站上MA20與MA200）")
-        elif r["price"] < r["ma200"] and r["price"] < r["ma20"]:
-            parts.append("濾網：偏空／慎追多（低於MA20與MA200）")
-        elif r["price"] >= r["ma200"] and r["price"] < r["ma20"]:
-            parts.append("濾網：大方向仍偏多，短線回踩MA20中")
+        parts.append(f"MA200 {r['ma200']:.2f}（{pos200}，{r['ma200_slope_lbl']}）")
+    if r.get("rs_qqq") is not None:
+        if r["rs_qqq"] >= 1.0:
+            parts.append(f"近{RS_DAYS}日相對QQQ偏強 {r['rs_qqq']:+.1f}%")
+        elif r["rs_qqq"] <= -1.0:
+            parts.append(f"近{RS_DAYS}日相對QQQ偏弱 {r['rs_qqq']:+.1f}%")
         else:
-            parts.append("濾網：短線強於MA20，但尚未站回MA200")
-    return "｜".join(parts)
+            parts.append(f"近{RS_DAYS}日相對QQQ中性 {r['rs_qqq']:+.1f}%")
+    return "｜".join(parts) if parts else "均線資料不足"
 
 
-def make_suggestion(r):
+def make_plan(r):
+    """條件式計畫：不給單純綠燈／紅燈"""
+    px = r["price"]
     sup = r["support"]
     res = r["resist"]
-    event = r["event"]
-    bb = r["bb_label"]
-    px = r["price"]
+    ma20 = r.get("ma20")
+    ma200 = r.get("ma200")
     narrow = r.get("narrow", False)
-
-    ma_tail = ""
-    if r.get("ma200") is not None and px < r["ma200"]:
-        ma_tail = "｜均線：在MA200下，追多需更嚴格"
-    elif r.get("ma20") is not None and px < r["ma20"] and r.get("ma200") is not None and px >= r["ma200"]:
-        ma_tail = "｜均線：回踩MA20，偏等多看支撐是否守住"
-    elif r.get("ma20") is not None and px >= r["ma20"] and r.get("ma200") is not None and px >= r["ma200"]:
-        ma_tail = "｜均線：站上MA20/200，結構偏多可參考"
+    rs = r.get("rs_qqq")
 
     if narrow:
         return (
-            f"建議：結構過窄（支撐壓力間距偏小）｜改看 20 日 "
-            f"{sup:.2f}–{res:.2f}｜暫不硬做區間，等突破或跌破再定義"
-            f"{ma_tail}"
+            "計畫：區間過窄，不給進出價｜只觀察是否放量突破/"
+            f"跌破 20 日界 {sup:.2f}–{res:.2f}｜此前不當波段單"
         )
 
-    entry_lo = sup
-    entry_hi = sup * 1.015
+    above200 = ma200 is not None and px >= ma200
+    below20 = ma20 is not None and px < ma20
+    above20 = ma20 is not None and px >= ma20
+    rs_weak = rs is not None and rs <= -1.0
+    rs_strong = rs is not None and rs >= 1.0
+
     stop = sup * 0.99
+    entry_hi = sup * 1.015
     mid = (sup + res) / 2
 
-    if event == "跌破5日低":
+    # 破位
+    if r["breakdown"]:
+        reclaim = f"{sup:.2f}–{entry_hi:.2f}"
         return (
-            f"建議：偏弱，先觀望｜等站回 {sup:.2f}–{entry_hi:.2f} 再考慮｜未站回不追"
-            f"{ma_tail}"
+            f"計畫：已跌破近5日低｜不追空頭反彈｜"
+            f"若收盤站回 {reclaim} 再評估｜未站回不做多｜"
+            f"失效：繼續弱於MA20且相對QQQ偏弱"
         )
-    if event == "突破5日高":
+
+    # 靠近壓力／上軌：減碼計畫，不是買入
+    if r["near_res"] or "上軌" in r["bb_label"]:
         return (
-            f"建議：偏強｜回測 {sup:.2f}–{px:.2f} 可考慮接｜"
-            f"停損 <{stop:.2f}｜目標 {res:.2f}{ma_tail}"
+            f"計畫：靠近壓力／上軌，不追高｜"
+            f"減碼參考 {res * 0.99:.2f}–{res:.2f}｜"
+            f"若回落至 {mid:.2f} 且仍站上MA200，再談是否回補｜"
+            f"失效：放量收盤站穩壓力上方並相對QQQ轉強"
         )
-    if event == "靠近支撐" or "下軌" in bb:
+
+    # 靠近支撐／下軌：條件式承接
+    if r["near_sup"] or "下軌" in r["bb_label"]:
+        if not above200:
+            return (
+                f"計畫：近支撐但在MA200下｜只小倉試錯或觀望｜"
+                f"區 {sup:.2f}–{entry_hi:.2f}｜停損 <{stop:.2f}｜"
+                f"未站回MA200不放大"
+            )
+        if rs_weak:
+            return (
+                f"計畫：近支撐但近{RS_DAYS}日弱於QQQ｜優先等止穩｜"
+                f"若守住 {sup:.2f} 且相對強度轉正，區 {sup:.2f}–{entry_hi:.2f}｜"
+                f"停損 <{stop:.2f}｜失效：收盤破支撐"
+            )
         return (
-            f"建議：偏支撐區｜進 {entry_lo:.2f}–{entry_hi:.2f}｜"
-            f"停損 <{stop:.2f}｜目標 {mid:.2f} / {res:.2f}{ma_tail}"
+            f"計畫：近支撐且大方向仍在MA200上｜"
+            f"僅在 {sup:.2f}–{entry_hi:.2f} 考慮｜停損 <{stop:.2f}｜"
+            f"目標 {mid:.2f} / {res:.2f}｜失效：收盤破支撐或相對QQQ持續轉弱"
         )
-    if event == "靠近壓力" or "上軌" in bb:
+
+    # 突破：只接受回測，不追現價
+    if r["breakout"]:
         return (
-            f"建議：接近壓力，慎追高｜減碼/出場參考 {res * 0.99:.2f}–{res:.2f}｜"
-            f"未突破不追｜回落看 {mid:.2f}{ma_tail}"
+            f"計畫：突破近5日高｜不追現價｜"
+            f"回測 {sup:.2f}–{px * 0.99:.2f} 且守住再考慮｜"
+            f"停損 <{stop:.2f}｜目標看 {res:.2f}｜"
+            f"失效：回測破支撐且相對QQQ轉弱"
         )
+
+    # 回踩 MA20（在 200 上）
+    if above200 and below20 and ma20 is not None:
+        return (
+            f"計畫：大方向在MA200上、短線回踩MA20｜"
+            f"觀察 {ma20:.2f}–{sup:.2f} 是否止穩｜"
+            f"未止穩不加｜失效：收盤跌破MA20且跌破 {sup:.2f}"
+        )
+
+    # 中段
+    if above200 and above20:
+        return (
+            f"計畫：中段偏多結構｜不追｜等回落 {sup:.2f}–{entry_hi:.2f} "
+            f"或明確突破 {res:.2f}｜失效：跌破MA20轉弱"
+        )
+
     return (
-        f"建議：區間中段，等邊緣｜偏多等 {entry_lo:.2f}–{entry_hi:.2f}｜"
-        f"偏出看 {res * 0.99:.2f}–{res:.2f}{ma_tail}"
+        f"計畫：位置一般｜不做追價｜"
+        f"多單條件：站上MA200並回測有承接｜"
+        f"空倉條件：破 {sup:.2f} 且弱於QQQ"
     )
 
 
 def make_chart_base64(hist, support, resist, ticker):
-    """K線 + 支撐/壓力(點畫) + 布林(實線) + MA200，無 MA20、無標題"""
     try:
         close_full = hist["Close"]
-
         mid_full = close_full.rolling(BB_PERIOD).mean()
         std_full = close_full.rolling(BB_PERIOD).std()
         upper_full = mid_full + BB_STD * std_full
@@ -263,11 +314,7 @@ def make_chart_base64(hist, support, resist, ticker):
 
         buf = io.BytesIO()
         mc = mpf.make_marketcolors(
-            up="#3dd68c",
-            down="#ff6b6b",
-            edge="inherit",
-            wick="inherit",
-            volume="in",
+            up="#3dd68c", down="#ff6b6b", edge="inherit", wick="inherit", volume="in"
         )
         style = mpf.make_mpf_style(
             base_mpf_style="nightclouds",
@@ -281,15 +328,9 @@ def make_chart_base64(hist, support, resist, ticker):
 
         apds = []
         if df["bb_u"].notna().sum() > 5:
-            apds.append(
-                mpf.make_addplot(df["bb_u"], color="#c9d1d9", width=1.0, linestyle="-")
-            )
-            apds.append(
-                mpf.make_addplot(df["bb_m"], color="#8b949e", width=1.0, linestyle="-")
-            )
-            apds.append(
-                mpf.make_addplot(df["bb_l"], color="#c9d1d9", width=1.0, linestyle="-")
-            )
+            apds.append(mpf.make_addplot(df["bb_u"], color="#c9d1d9", width=1.0, linestyle="-"))
+            apds.append(mpf.make_addplot(df["bb_m"], color="#8b949e", width=1.0, linestyle="-"))
+            apds.append(mpf.make_addplot(df["bb_l"], color="#c9d1d9", width=1.0, linestyle="-"))
         if df["ma200"].notna().sum() > 5:
             apds.append(mpf.make_addplot(df["ma200"], color="#ff7b72", width=1.2))
 
@@ -303,7 +344,6 @@ def make_chart_base64(hist, support, resist, ticker):
         if extra:
             lo = min(lo, min(extra))
             hi = max(hi, max(extra))
-
         pad = (hi - lo) * 0.03 if hi > lo else 1.0
         y_lo, y_hi = lo - pad, hi + pad
 
@@ -334,11 +374,7 @@ def make_chart_base64(hist, support, resist, ticker):
             figratio=(12, 7),
             figscale=1.05,
             savefig=dict(
-                fname=buf,
-                dpi=110,
-                bbox_inches="tight",
-                facecolor="#0f1115",
-                pad_inches=0.2,
+                fname=buf, dpi=110, bbox_inches="tight", facecolor="#0f1115", pad_inches=0.2
             ),
             tight_layout=True,
             update_width_config=dict(candle_linewidth=0.8),
@@ -358,7 +394,7 @@ def make_chart_base64(hist, support, resist, ticker):
         return None
 
 
-def analyze(ticker, hist):
+def analyze(ticker, hist, bench_close):
     close = hist["Close"]
     high = hist["High"]
     low = hist["Low"]
@@ -376,7 +412,7 @@ def analyze(ticker, hist):
     span_pct = (resist - support) / price * 100 if price > 0 else 0.0
     narrow = span_pct < NARROW_PCT
     if narrow:
-        support, resist = c_low, c_high
+        support, resist = float(c_low), float(c_high)
         if support >= resist:
             support, resist = s_low, s_high
 
@@ -388,22 +424,18 @@ def analyze(ticker, hist):
     bb_u, bb_m, bb_l = bollinger(close)
     bb_label, bb_pct = bb_position(price, bb_u, bb_l)
 
-    # 均線
     ma20_s = close.rolling(20).mean()
     ma200_s = close.rolling(200).mean()
     ma20 = float(ma20_s.iloc[-1]) if ma20_s.notna().iloc[-1] else None
-    ma200 = float(ma200_s.iloc[-1]) if len(ma200_s.dropna()) >= 200 and ma200_s.notna().iloc[-1] else None
-    if ma200 is None and ma200_s.notna().iloc[-1]:
-        # 資料不足 200 根時仍給現值，但斜率用既有段
-        ma200 = float(ma200_s.iloc[-1])
-
+    ma200 = float(ma200_s.iloc[-1]) if ma200_s.notna().iloc[-1] else None
     ma20_slope = linear_slope(ma20_s.dropna().iloc[-10:]) if ma20_s.dropna().shape[0] >= 10 else 0.0
-    ma200_slope = linear_slope(ma200_s.dropna().iloc[-20:]) if ma200_s.dropna().shape[0] >= 20 else 0.0
-    ma20_slope_lbl = ma_slope_label(ma20_slope)
-    ma200_slope_lbl = ma_slope_label(ma200_slope)
+    ma200_slope = (
+        linear_slope(ma200_s.dropna().iloc[-20:]) if ma200_s.dropna().shape[0] >= 20 else 0.0
+    )
 
     slope = linear_slope(close.iloc[-12:])
     channel = channel_label(slope)
+    rs_qqq = rel_strength_vs_bench(close, bench_close, RS_DAYS)
 
     if len(high) > SHORT_DAYS:
         prev_hi = float(high.iloc[-SHORT_DAYS - 1 : -1].max())
@@ -414,7 +446,7 @@ def analyze(ticker, hist):
     breakout = price > prev_hi * 1.002
     breakdown = price < prev_lo * 0.998
 
-    if narrow and not breakout and not breakdown:
+    if narrow:
         event = "結構過窄"
     elif breakout:
         event = "突破5日高"
@@ -424,6 +456,8 @@ def analyze(ticker, hist):
         event = "靠近壓力"
     elif near_sup:
         event = "靠近支撐"
+    elif ma200 is not None and price >= ma200 and ma20 is not None and price < ma20:
+        event = "回踩MA20"
     else:
         event = "中段"
 
@@ -443,6 +477,12 @@ def analyze(ticker, hist):
     else:
         stats, side = None, None
 
+    # 20 日區間位置 0~100
+    if c_high > c_low:
+        pos_20 = (price - c_low) / (c_high - c_low) * 100
+    else:
+        pos_20 = 50.0
+
     r = {
         "ticker": ticker,
         "price": price,
@@ -454,7 +494,6 @@ def analyze(ticker, hist):
         "event": event,
         "vol_desc": vol_desc,
         "bb_label": bb_label,
-        "bb_pct": bb_pct,
         "breakout": breakout,
         "breakdown": breakdown,
         "near_sup": near_sup,
@@ -462,14 +501,34 @@ def analyze(ticker, hist):
         "narrow": narrow,
         "ma20": ma20,
         "ma200": ma200,
-        "ma20_slope_lbl": ma20_slope_lbl,
-        "ma200_slope_lbl": ma200_slope_lbl,
+        "ma20_slope_lbl": ma_slope_label(ma20_slope),
+        "ma200_slope_lbl": ma_slope_label(ma200_slope),
+        "rs_qqq": rs_qqq,
+        "pos_20": pos_20,
         "stats": stats,
         "side": side,
         "hist": hist,
     }
     r["ma_note"] = make_ma_note(r)
-    r["suggestion"] = make_suggestion(r)
+    r["plan"] = make_plan(r)
+
+    # 需關注：有計畫價值；過窄預設不進
+    pullback_ma20 = (
+        ma200 is not None
+        and price >= ma200
+        and ma20 is not None
+        and price <= ma20 * 1.01
+        and price >= ma20 * 0.97
+    )
+    r["focus"] = (not narrow) and (
+        near_sup
+        or near_res
+        or breakout
+        or breakdown
+        or pullback_ma20
+        or "下軌" in bb_label
+        or "上軌" in bb_label
+    )
     return r
 
 
@@ -478,9 +537,9 @@ def event_class(event):
         return "up"
     if "跌破" in event:
         return "down"
-    if "壓力" in event:
+    if "壓力" in event or "上軌" in event:
         return "resist"
-    if "支撐" in event:
+    if "支撐" in event or "下軌" in event or "回踩" in event:
         return "support"
     if "過窄" in event:
         return "narrow"
@@ -488,37 +547,20 @@ def event_class(event):
 
 
 def build_html(results, now_str):
-    br = [r["ticker"] for r in results if r["breakout"]]
-    bd = [r["ticker"] for r in results if r["breakdown"]]
-    up = [r["ticker"] for r in results if "上軌" in r["bb_label"]]
-    dn = [r["ticker"] for r in results if "下軌" in r["bb_label"]]
+    focus = [r for r in results if r.get("focus")]
     narrow_list = [r["ticker"] for r in results if r.get("narrow")]
-    above_both = [
+    rs_strong = [
         r["ticker"]
         for r in results
-        if r.get("ma20") is not None
-        and r.get("ma200") is not None
-        and r["price"] >= r["ma20"]
-        and r["price"] >= r["ma200"]
+        if r.get("rs_qqq") is not None and r["rs_qqq"] >= 1.0
     ]
-    below_both = [
+    rs_weak = [
         r["ticker"]
         for r in results
-        if r.get("ma20") is not None
-        and r.get("ma200") is not None
-        and r["price"] < r["ma20"]
-        and r["price"] < r["ma200"]
+        if r.get("rs_qqq") is not None and r["rs_qqq"] <= -1.0
     ]
-
-    focus = [
-        r
-        for r in results
-        if r["near_sup"]
-        or r["near_res"]
-        or r["breakout"]
-        or r["breakdown"]
-        or r.get("narrow")
-    ]
+    near_sup = [r["ticker"] for r in results if r.get("near_sup") and not r.get("narrow")]
+    near_res = [r["ticker"] for r in results if r.get("near_res") and not r.get("narrow")]
 
     for r in focus:
         print(f"chart {r['ticker']} ...")
@@ -529,27 +571,27 @@ def build_html(results, now_str):
         cls = event_class(r["event"])
         ma20_txt = f"{r['ma20']:.2f}" if r.get("ma20") is not None else "—"
         ma200_txt = f"{r['ma200']:.2f}" if r.get("ma200") is not None else "—"
+        rs_txt = f"{r['rs_qqq']:+.1f}%" if r.get("rs_qqq") is not None else "—"
         rows.append(
             f"""<tr class="{cls}">
             <td><b>{html.escape(r['ticker'])}</b></td>
             <td class="num">{r['price']:.2f}</td>
             <td class="num">{r['support']:.2f}</td>
-            <td class="num">{r['dist_sup']:+.1f}%</td>
             <td class="num">{r['resist']:.2f}</td>
-            <td class="num">{r['dist_res']:+.1f}%</td>
-            <td>{html.escape(r['channel'])}</td>
+            <td class="num">{r['pos_20']:.0f}%</td>
             <td>{html.escape(r['event'])}</td>
             <td>{html.escape(r['bb_label'])}</td>
             <td class="num">{ma20_txt}</td>
             <td class="num">{ma200_txt}</td>
+            <td class="num">{rs_txt}</td>
             <td>{html.escape(r['vol_desc'])}</td>
             </tr>
-            <tr class="suggest"><td colspan="12">↳ {html.escape(r.get('suggestion', ''))}<br/>↳ 均線：{html.escape(r.get('ma_note', ''))}</td></tr>"""
+            <tr class="suggest"><td colspan="11">↳ {html.escape(r.get('plan', ''))}<br/>↳ {html.escape(r.get('ma_note', ''))}</td></tr>"""
         )
 
     focus_blocks = []
     if not focus:
-        focus_blocks.append("<p>無</p>")
+        focus_blocks.append("<p>今日無符合「有計畫價值」的檔（過窄已排除）。</p>")
     else:
         for r in focus:
             stat = ""
@@ -560,7 +602,7 @@ def build_html(results, now_str):
                     if s:
                         parts.append(f"{d}d:{s['winrate']:.0f}%/{s['avg']:+.1f}%")
                 if parts:
-                    stat = f"{r['side']} → " + " · ".join(parts)
+                    stat = f"{r['side']}歷史 → " + " · ".join(parts)
 
             if r.get("chart"):
                 chart_html = (
@@ -577,6 +619,7 @@ def build_html(results, now_str):
             else:
                 chart_html = '<div class="chart miss">（圖表產生失敗）</div>'
 
+            rs_txt = f"{r['rs_qqq']:+.1f}%" if r.get("rs_qqq") is not None else "—"
             focus_blocks.append(
                 f"""
 <div class="card">
@@ -586,13 +629,13 @@ def build_html(results, now_str):
     <span class="px">{r['price']:.2f}</span>
   </div>
   <div class="card-m">
-    支撐 {r['support']:.2f}（{r['dist_sup']:+.1f}%） ·
-    壓力 {r['resist']:.2f}（{r['dist_res']:+.1f}%） ·
-    {html.escape(r['bb_label'])} · {html.escape(r['channel'])} · {html.escape(r['vol_desc'])}
+    支撐 {r['support']:.2f} · 壓力 {r['resist']:.2f} ·
+    20日位置 {r['pos_20']:.0f}% · {html.escape(r['bb_label'])} ·
+    vsQQQ {rs_txt} · {html.escape(r['vol_desc'])}
   </div>
   {chart_html}
-  <div class="sug">↳ {html.escape(r.get('suggestion', ''))}</div>
-  <div class="ma">↳ 均線：{html.escape(r.get('ma_note', ''))}</div>
+  <div class="sug">↳ {html.escape(r.get('plan', ''))}</div>
+  <div class="ma">↳ {html.escape(r.get('ma_note', ''))}</div>
   <div class="stat">{html.escape(stat) if stat else ''}</div>
 </div>
 """
@@ -603,12 +646,9 @@ def build_html(results, now_str):
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
-<title>結構分析報告（圖表版）</title>
+<title>結構計畫報告</title>
 <style>
-html, body {{
-  -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%;
-}}
+html, body {{ -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }}
 body {{
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   margin: 12px; background: #0f1115; color: #e8eaed;
@@ -627,10 +667,9 @@ h2 {{
   display: inline-block; background: #1e222a; padding: 4px 8px;
   border-radius: 6px; margin: 2px 4px 2px 0; font-size: 0.85rem;
 }}
-.legend {{ font-size: 0.8rem; color: #9aa0a6; margin: 8px 0 12px; }}
-.legend i {{
-  display: inline-block; width: 10px; height: 10px;
-  border-radius: 2px; margin: 0 4px 0 10px; vertical-align: middle;
+.note {{
+  background: #1a2332; border-left: 3px solid #58a6ff;
+  padding: 8px 10px; margin: 8px 0 12px; font-size: 0.8rem; color: #b0c4de;
 }}
 .card {{
   background: #161b22; border: 1px solid #2a2f3a; border-radius: 10px;
@@ -647,44 +686,30 @@ h2 {{
 .tag.support {{ background: #0d2a4a; color: #58a6ff; }}
 .tag.narrow {{ background: #2a2a2a; color: #c9d1d9; }}
 .card-m {{ color: #9aa0a6; font-size: 0.8rem; margin-bottom: 8px; }}
-.chart {{ margin: 8px 0 0; }}
 .chart img {{
   width: 100%; max-width: 900px; height: auto;
   border-radius: 8px; display: block; background: #0f1115;
 }}
 .chart.miss {{ color: #6b7280; font-size: 0.8rem; }}
 .chart-legend {{
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  margin: 6px 0 4px;
-  font-size: 11px;
-  color: #9aa0a6;
-  -webkit-text-size-adjust: 100%;
+  display: flex; flex-wrap: wrap; gap: 8px 12px; margin: 6px 0 4px;
+  font-size: 11px; color: #9aa0a6;
 }}
-.chart-legend span {{ white-space: nowrap; }}
 .lg-sup {{ color: #58a6ff; font-weight: 600; }}
 .lg-res {{ color: #f0c14b; font-weight: 600; }}
 .lg-bb {{ color: #c9d1d9; }}
 .lg-ma200 {{ color: #ff7b72; }}
 .sug {{
-  color: #9ecbff; font-size: 11px; line-height: 1.35; margin-top: 6px;
-  -webkit-text-size-adjust: 100%;
+  color: #9ecbff; font-size: 11px; line-height: 1.4; margin-top: 6px;
 }}
-.ma {{
-  color: #7ee787; font-size: 11px; line-height: 1.35; margin-top: 4px;
-  -webkit-text-size-adjust: 100%;
-}}
+.ma {{ color: #7ee787; font-size: 11px; line-height: 1.35; margin-top: 4px; }}
 .stat {{ color: #8b949e; font-size: 11px; margin-top: 4px; }}
 .wrap {{ overflow-x: auto; -webkit-overflow-scrolling: touch; }}
-table {{
-  border-collapse: collapse; width: 100%;
-  min-width: 820px; font-size: 13px;
-}}
+table {{ border-collapse: collapse; width: 100%; min-width: 860px; font-size: 13px; }}
 th, td {{ border-bottom: 1px solid #2a2f3a; padding: 8px 6px; text-align: left; }}
 th {{
   color: #9aa0a6; font-weight: 600; position: sticky; top: 0;
-  background: #0f1115; white-space: nowrap; font-size: 13px;
+  background: #0f1115; white-space: nowrap;
 }}
 td.num {{ font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }}
 tr.up td {{ background: #0d3d1a !important; box-shadow: inset 4px 0 0 #3dd68c; }}
@@ -695,44 +720,37 @@ tr.narrow td {{ background: #222 !important; box-shadow: inset 4px 0 0 #8b949e; 
 tr.suggest td {{
   background: #161b22 !important; color: #9ecbff;
   font-size: 11px !important; padding-top: 2px; padding-bottom: 6px;
-  border-bottom: 1px solid #3a3f4a; white-space: normal; line-height: 1.35;
+  border-bottom: 1px solid #3a3f4a; white-space: normal; line-height: 1.4;
 }}
 .footer {{ margin-top: 20px; color: #6b7280; font-size: 12px; }}
 </style>
 </head>
 <body>
-<h1>關鍵位 + 布林 + 均線 <span class="badge">圖表版</span></h1>
-<div class="meta">產生時間：{html.escape(now_str)}（台灣時間） · 共 {len(results)} 檔 · 僅「需關注」附 K 線</div>
+<h1>結構計畫 <span class="badge">條件式 · 非當日漲跌燈</span></h1>
+<div class="meta">產生時間：{html.escape(now_str)}（台灣時間） · 共 {len(results)} 檔 · 需關注 {len(focus)} 檔</div>
+
+<div class="note">
+過窄不給進出建議、也不進需關注。計畫皆為「條件＋價位＋失效」。相對QQQ為近{RS_DAYS}日報酬差。非投資建議。
+</div>
 
 <h2>摘要</h2>
 <div class="summary">
-  <span>突破5日高：{", ".join(br) if br else "無"}</span>
-  <span>跌破5日低：{", ".join(bd) if bd else "無"}</span>
-  <span>布林上軌：{", ".join(up) if up else "無"}</span>
-  <span>布林下軌：{", ".join(dn) if dn else "無"}</span>
-  <span>結構過窄：{", ".join(narrow_list) if narrow_list else "無"}</span>
-  <span>站上MA20+200：{", ".join(above_both) if above_both else "無"}</span>
-  <span>低於MA20+200：{", ".join(below_both) if below_both else "無"}</span>
-</div>
-<div class="legend">
-  <i style="background:#3dd68c;margin-left:0"></i>突破
-  <i style="background:#ff6b6b"></i>跌破
-  <i style="background:#58a6ff"></i>支撐（點畫）
-  <i style="background:#f0c14b"></i>壓力（點畫）
-  <i style="background:#c9d1d9"></i>布林
-  <i style="background:#ff7b72"></i>MA200
-  <i style="background:#8b949e"></i>結構過窄
+  <span>近支撐（有效）：{", ".join(near_sup) if near_sup else "無"}</span>
+  <span>近壓力（有效）：{", ".join(near_res) if near_res else "無"}</span>
+  <span>相對QQQ強：{", ".join(rs_strong) if rs_strong else "無"}</span>
+  <span>相對QQQ弱：{", ".join(rs_weak) if rs_weak else "無"}</span>
+  <span>過窄（忽略進出）：{", ".join(narrow_list) if narrow_list else "無"}</span>
 </div>
 
-<h2>需關注（含 K 線）</h2>
+<h2>需關注（有計畫價值 · 含K線）</h2>
 {''.join(focus_blocks)}
 
 <h2>全部清單</h2>
 <div class="wrap">
 <table>
 <thead><tr>
-<th>代號</th><th>現價</th><th>支撐</th><th>距%</th><th>壓力</th><th>距%</th>
-<th>通道</th><th>狀態</th><th>布林</th><th>MA20</th><th>MA200</th><th>量能</th>
+<th>代號</th><th>現價</th><th>支撐</th><th>壓力</th><th>20日位</th>
+<th>狀態</th><th>布林</th><th>MA20</th><th>MA200</th><th>vsQQQ</th><th>量</th>
 </tr></thead>
 <tbody>
 {''.join(rows)}
@@ -741,7 +759,7 @@ tr.suggest td {{
 </div>
 
 <div class="footer">
-資料來源 yfinance · 均線作方向濾網，結構作價位參考 · 非投資建議 · report_charts.html
+位置＋條件計畫 · 過窄不交易 · report_charts.html
 </div>
 </body>
 </html>
@@ -752,13 +770,35 @@ def main():
     now = datetime.now(pytz.timezone("Asia/Taipei"))
     now_str = now.strftime("%Y-%m-%d %H:%M")
 
+    bench = get_history("QQQ")
+    if bench is None:
+        print("QQQ bench failed")
+        bench_close = None
+    else:
+        bench_close = bench["Close"]
+
     results = []
     for t in CORE_LIST:
         hist = get_history(t)
         if hist is None:
             print(f"{t}: skip")
             continue
-        results.append(analyze(t, hist))
+        if bench_close is None:
+            # 無基準時仍分析，rs 為 None
+            class _Dummy:
+                def dropna(self):
+                    return self
+
+                @property
+                def index(self):
+                    return hist["Close"].index
+
+                def __getitem__(self, k):
+                    return hist["Close"].iloc[0]
+
+            results.append(analyze(t, hist, hist["Close"]))
+        else:
+            results.append(analyze(t, hist, bench_close))
         print(f"ok {t}")
 
     doc = build_html(results, now_str)
