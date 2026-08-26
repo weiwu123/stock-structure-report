@@ -13,7 +13,7 @@ matplotlib.use("Agg")
 import mplfinance as mpf
 
 CORE_LIST = [
-    "AMD", "GOOG", "MRVL", "MXL", "HPE", "FIG",
+    "AMD", "GOOG", "MRVL", "MXL", "HPE", "FIG", "NBIS"
     "AAPL", "AMZN", "ANET", "AVGO", "CSCO", "DELL",
     "IBM", "INTC", "MSFT", "MU", "NET", "NOW", "NVDA",
     "ORCL", "PLTR", "QCOM", "SNOW", "TSLA", "TSM", "QQQM",
