@@ -4,6 +4,7 @@ import html
 from datetime import datetime
 
 import numpy as np
+import pandas as pd
 import pytz
 import yfinance as yf
 
@@ -32,16 +33,28 @@ NARROW_PCT = 3.0
 FORWARD_LIST = [1, 3, 5]
 CHART_DAYS = 80
 
-# Fib 顏色
-FIB60_COLOR = "#a371f7"  # 紫：60日
-FIB20_COLOR = "#39c5cf"  # 青：20日
+FIB60_COLOR = "#a371f7"
+FIB20_COLOR = "#39c5cf"
 
 
 def get_history(ticker, days=320):
     try:
         t = yf.Ticker(ticker)
-        hist = t.history(period=f"{days}d")
-        if hist is None or len(hist) < CTX_DAYS + 15:
+        hist = t.history(period=f"{days}d", auto_adjust=True)
+        if hist is None or hist.empty or len(hist) < CTX_DAYS + 15:
+            return None
+        if isinstance(hist.columns, pd.MultiIndex):
+            hist.columns = hist.columns.get_level_values(0)
+        hist = hist[~hist.index.duplicated(keep="last")]
+        need = ["Open", "High", "Low", "Close", "Volume"]
+        for c in need:
+            if c not in hist.columns:
+                return None
+        hist = hist[need].copy()
+        for c in need:
+            hist[c] = pd.to_numeric(hist[c], errors="coerce")
+        hist = hist.dropna(how="any")
+        if len(hist) < CTX_DAYS + 15:
             return None
         return hist
     except Exception as e:
@@ -50,7 +63,8 @@ def get_history(ticker, days=320):
 
 
 def linear_slope(series):
-    y = series.values.astype(float)
+    y = np.asarray(series, dtype=float)
+    y = y[np.isfinite(y)]
     if len(y) < 5:
         return 0.0
     x = np.arange(len(y))
@@ -77,9 +91,19 @@ def ma_slope_label(slope):
     return "走平"
 
 
+def last_ma(series, min_periods):
+    s = series.dropna()
+    if len(s) < min_periods:
+        return None
+    v = float(s.iloc[-1])
+    if not np.isfinite(v):
+        return None
+    return v
+
+
 def bollinger(close, period=BB_PERIOD, num_std=BB_STD):
-    mid = close.rolling(period).mean()
-    std = close.rolling(period).std()
+    mid = close.rolling(period, min_periods=period).mean()
+    std = close.rolling(period, min_periods=period).std()
     return (
         float((mid + num_std * std).iloc[-1]),
         float(mid.iloc[-1]),
@@ -88,7 +112,7 @@ def bollinger(close, period=BB_PERIOD, num_std=BB_STD):
 
 
 def bb_position(price, upper, lower):
-    if upper <= lower:
+    if not np.isfinite(upper) or not np.isfinite(lower) or upper <= lower:
         return "中軌附近", 50.0
     pct = (price - lower) / (upper - lower) * 100
     if price >= upper * 0.998:
@@ -128,7 +152,6 @@ def nearest_levels(price, sh, sl, fb_high, fb_low):
 
 
 def calc_fib(hist, days):
-    """近 days 日高低 → 多頭回撤 0.5 / 0.618"""
     if hist is None or len(hist) < max(10, days // 2):
         return None
     window = hist.tail(min(days, len(hist)))
@@ -231,15 +254,11 @@ def make_fib_note(r):
     bits = []
     f20, f60 = r.get("fib20"), r.get("fib60")
     if f20:
-        bits.append(
-            f"Fib20：{f20['zone_lo']:.2f}–{f20['zone_hi']:.2f}（{r.get('fib20_pos')}）"
-        )
+        bits.append(f"Fib20：{f20['zone_lo']:.2f}–{f20['zone_hi']:.2f}（{r.get('fib20_pos')}）")
     else:
         bits.append("Fib20：波段不足")
     if f60:
-        bits.append(
-            f"Fib60：{f60['zone_lo']:.2f}–{f60['zone_hi']:.2f}（{r.get('fib60_pos')}）"
-        )
+        bits.append(f"Fib60：{f60['zone_lo']:.2f}–{f60['zone_hi']:.2f}（{r.get('fib60_pos')}）")
     else:
         bits.append("Fib60：波段不足")
     return "｜".join(bits)
@@ -257,9 +276,19 @@ def make_suggestion(r):
     ma_tail = ""
     if r.get("ma200") is not None and px < r["ma200"]:
         ma_tail = "｜均線：在MA200下，追多需更嚴格"
-    elif r.get("ma20") is not None and px < r["ma20"] and r.get("ma200") is not None and px >= r["ma200"]:
+    elif (
+        r.get("ma20") is not None
+        and px < r["ma20"]
+        and r.get("ma200") is not None
+        and px >= r["ma200"]
+    ):
         ma_tail = "｜均線：回踩MA20，偏等多看支撐是否守住"
-    elif r.get("ma20") is not None and px >= r["ma20"] and r.get("ma200") is not None and px >= r["ma200"]:
+    elif (
+        r.get("ma20") is not None
+        and px >= r["ma20"]
+        and r.get("ma200") is not None
+        and px >= r["ma200"]
+    ):
         ma_tail = "｜均線：站上MA20/200，結構偏多可參考"
 
     fib_tail = ""
@@ -281,8 +310,6 @@ def make_suggestion(r):
     entry_lo, entry_hi = sup, sup * 1.015
     stop = sup * 0.99
     mid = (sup + res) / 2
-
-    # 進場區優先與 Fib60 帶重疊時略收斂提示
     if f60 and r.get("fib60_pos") == "帶內":
         entry_lo = max(entry_lo, f60["zone_lo"])
         entry_hi = min(max(entry_hi, f60["zone_lo"]), f60["zone_hi"])
@@ -304,23 +331,23 @@ def make_suggestion(r):
         )
     if event == "靠近壓力" or "上軌" in bb:
         return (
-            f"建議：近壓力慎追｜減碼參考 {res*0.99:.2f}–{res:.2f}｜回落看 {mid:.2f}"
+            f"建議：近壓力慎追｜減碼參考 {res * 0.99:.2f}–{res:.2f}｜回落看 {mid:.2f}"
             f"{ma_tail}{fib_tail}"
         )
     return (
         f"建議：中段等邊緣｜偏多等 {entry_lo:.2f}–{entry_hi:.2f}｜"
-        f"偏出看 {res*0.99:.2f}–{res:.2f}{ma_tail}{fib_tail}"
+        f"偏出看 {res * 0.99:.2f}–{res:.2f}{ma_tail}{fib_tail}"
     )
 
 
 def make_chart_base64(hist, support, resist, ticker, fib20=None, fib60=None):
     try:
-        close_full = hist["Close"]
-        mid_full = close_full.rolling(BB_PERIOD).mean()
-        std_full = close_full.rolling(BB_PERIOD).std()
+        close_full = hist["Close"].astype(float)
+        mid_full = close_full.rolling(BB_PERIOD, min_periods=BB_PERIOD).mean()
+        std_full = close_full.rolling(BB_PERIOD, min_periods=BB_PERIOD).std()
         upper_full = mid_full + BB_STD * std_full
         lower_full = mid_full - BB_STD * std_full
-        ma200_full = close_full.rolling(200).mean()
+        ma200_full = close_full.rolling(200, min_periods=200).mean()
 
         df = hist.tail(CHART_DAYS).copy()
         df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
@@ -408,7 +435,6 @@ def make_chart_base64(hist, support, resist, ticker, fib20=None, fib60=None):
         fig, axes = mpf.plot(df, **plot_kwargs)
         ax = axes[0] if isinstance(axes, (list, np.ndarray)) else axes
 
-        # 60日：紫半透明；20日：青半透明（先畫60再20，短線較醒目）
         if fib60 is not None:
             ax.axhspan(fib60["zone_lo"], fib60["zone_hi"], facecolor=FIB60_COLOR, alpha=0.16, zorder=0)
             ax.axhline(fib60["fib50"], color=FIB60_COLOR, linestyle="--", linewidth=1.0, alpha=0.8)
@@ -428,10 +454,10 @@ def make_chart_base64(hist, support, resist, ticker, fib20=None, fib60=None):
 
 
 def analyze(ticker, hist):
-    close = hist["Close"]
-    high = hist["High"]
-    low = hist["Low"]
-    vol = hist["Volume"]
+    close = hist["Close"].astype(float)
+    high = hist["High"].astype(float)
+    low = hist["Low"].astype(float)
+    vol = hist["Volume"].astype(float)
     price = float(close.iloc[-1])
 
     s_high = float(high.iloc[-SHORT_DAYS:].max())
@@ -454,14 +480,21 @@ def analyze(ticker, hist):
     near_sup = dist_sup <= NEAR_PCT
     near_res = dist_res <= NEAR_PCT
 
-    bb_u, bb_m, bb_l = bollinger(close)
-    bb_label, _ = bb_position(price, bb_u, bb_l)
+    try:
+        bb_u, bb_m, bb_l = bollinger(close)
+        bb_label, _ = bb_position(price, bb_u, bb_l)
+    except Exception:
+        bb_label = "—"
 
-    ma20_s = close.rolling(20).mean()
-    ma200_s = close.rolling(200).mean()
-    ma20 = float(ma20_s.iloc[-1]) if ma20_s.notna().iloc[-1] else None
-    ma200 = float(ma200_s.iloc[-1]) if ma200_s.notna().iloc[-1] else None
-    ma20_slope = linear_slope(ma20_s.dropna().iloc[-10:]) if ma20_s.dropna().shape[0] >= 10 else 0.0
+    ma20_s = close.rolling(20, min_periods=20).mean()
+    ma200_s = close.rolling(200, min_periods=200).mean()
+    ma20 = last_ma(ma20_s, 20)
+    ma200 = last_ma(ma200_s, 200)
+    print(f"{ticker} rows={len(hist)} ma20={ma20} ma200={ma200}")
+
+    ma20_slope = (
+        linear_slope(ma20_s.dropna().iloc[-10:]) if ma20_s.dropna().shape[0] >= 10 else 0.0
+    )
     ma200_slope = (
         linear_slope(ma200_s.dropna().iloc[-20:]) if ma200_s.dropna().shape[0] >= 20 else 0.0
     )
@@ -574,8 +607,12 @@ def build_html(results, now_str):
     for r in results:
         print(f"chart {r['ticker']} ...")
         r["chart"] = make_chart_base64(
-            r["hist"], r["support"], r["resist"], r["ticker"],
-            fib20=r.get("fib20"), fib60=r.get("fib60"),
+            r["hist"],
+            r["support"],
+            r["resist"],
+            r["ticker"],
+            fib20=r.get("fib20"),
+            fib60=r.get("fib60"),
         )
 
     def card_html(r, badge=None):
@@ -636,11 +673,13 @@ def build_html(results, now_str):
         cls = event_class(r["event"])
         f20 = (
             f"{r['fib20']['zone_lo']:.2f}–{r['fib20']['zone_hi']:.2f}"
-            if r.get("fib20") else "—"
+            if r.get("fib20")
+            else "—"
         )
         f60 = (
             f"{r['fib60']['zone_lo']:.2f}–{r['fib60']['zone_hi']:.2f}"
-            if r.get("fib60") else "—"
+            if r.get("fib60")
+            else "—"
         )
         ma20_txt = f"{r['ma20']:.2f}" if r.get("ma20") is not None else "—"
         ma200_txt = f"{r['ma200']:.2f}" if r.get("ma200") is not None else "—"
@@ -750,7 +789,7 @@ tr.suggest td {{
 </head>
 <body>
 <h1>關鍵位 + Fib20/60 <span class="badge">全檔K線</span></h1>
-<div class="meta">產生時間：{html.escape(now_str)}（台灣時間） · 紫＝Fib60 · 青＝Fib20 · 0.5–0.618 半透明帶</div>
+<div class="meta">產生時間：{html.escape(now_str)}（台灣時間） · 紫＝Fib60 · 青＝Fib20</div>
 
 <h2>摘要</h2>
 <div class="summary">
@@ -790,7 +829,7 @@ tr.suggest td {{
 </div>
 
 <div class="footer">
-Fib20青 / Fib60紫 · 波段幅度&lt;{FIB_MIN_SPAN_PCT}%不計 · 非投資建議 · report_charts.html
+Fib20青 / Fib60紫 · 均線已強化抓取 · 非投資建議 · report_charts.html
 </div>
 </body>
 </html>
