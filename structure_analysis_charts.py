@@ -21,6 +21,8 @@ CORE_LIST = [
 
 SHORT_DAYS = 5
 CTX_DAYS = 20
+FIB_DAYS = 60
+FIB_MIN_SPAN_PCT = 5.0  # 波段太小不畫 Fib
 BB_PERIOD = 20
 BB_STD = 2.0
 NEAR_PCT = 3.0
@@ -119,6 +121,55 @@ def nearest_levels(price, sh, sl, fb_high, fb_low):
     return float(support), float(resist)
 
 
+def calc_fib_60(hist, days=FIB_DAYS):
+    """
+    近 days 日高低當波段，多頭回撤：
+    0.5 / 0.618 從高點往下算。
+    回傳 dict 或 None（波段太小）。
+    """
+    if hist is None or len(hist) < days:
+        window = hist
+    else:
+        window = hist.tail(days)
+
+    lo = float(window["Low"].min())
+    hi = float(window["High"].max())
+    if hi <= lo or lo <= 0:
+        return None
+
+    span_pct = (hi - lo) / lo * 100
+    if span_pct < FIB_MIN_SPAN_PCT:
+        return None
+
+    # 回撤線：高 - 幅度 * ratio（0.618 價位較低）
+    fib50 = hi - (hi - lo) * 0.5
+    fib618 = hi - (hi - lo) * 0.618
+    # 保證 low_side < high_side
+    zone_lo = min(fib50, fib618)
+    zone_hi = max(fib50, fib618)
+
+    return {
+        "swing_low": lo,
+        "swing_high": hi,
+        "fib50": float(fib50),
+        "fib618": float(fib618),
+        "zone_lo": float(zone_lo),
+        "zone_hi": float(zone_hi),
+        "span_pct": float(span_pct),
+    }
+
+
+def fib_position_label(price, fib):
+    if fib is None:
+        return "無"
+    zlo, zhi = fib["zone_lo"], fib["zone_hi"]
+    if price < zlo * 0.998:
+        return "帶下（跌破0.618）"
+    if price > zhi * 1.002:
+        return "帶上（未回撤到0.5）"
+    return "帶內（0.5–0.618）"
+
+
 def hist_stats(hist, side):
     closes = hist["Close"].values.astype(float)
     highs = hist["High"].values.astype(float)
@@ -184,6 +235,16 @@ def make_ma_note(r):
     return "｜".join(parts)
 
 
+def make_fib_note(r):
+    fib = r.get("fib")
+    if not fib:
+        return "Fib：近60日波段不足，不計"
+    return (
+        f"Fib0.5–0.618：{fib['zone_lo']:.2f}–{fib['zone_hi']:.2f}"
+        f"（{r.get('fib_pos', '')}｜波段{fib['swing_low']:.2f}–{fib['swing_high']:.2f}）"
+    )
+
+
 def make_suggestion(r):
     sup = r["support"]
     res = r["resist"]
@@ -191,6 +252,8 @@ def make_suggestion(r):
     bb = r["bb_label"]
     px = r["price"]
     narrow = r.get("narrow", False)
+    fib = r.get("fib")
+    fib_pos = r.get("fib_pos", "")
 
     ma_tail = ""
     if r.get("ma200") is not None and px < r["ma200"]:
@@ -200,11 +263,20 @@ def make_suggestion(r):
     elif r.get("ma20") is not None and px >= r["ma20"] and r.get("ma200") is not None and px >= r["ma200"]:
         ma_tail = "｜均線：站上MA20/200，結構偏多可參考"
 
+    fib_tail = ""
+    if fib:
+        if "帶內" in fib_pos:
+            fib_tail = f"｜Fib：位於回撤帶 {fib['zone_lo']:.2f}–{fib['zone_hi']:.2f}，可當承接參考"
+        elif "帶下" in fib_pos:
+            fib_tail = f"｜Fib：已低於0.618（{fib['fib618']:.2f}），回撤偏深，慎接"
+        elif "帶上" in fib_pos:
+            fib_tail = f"｜Fib：仍在0.5上方（{fib['fib50']:.2f}），回撤未到位"
+
     if narrow:
         return (
             f"建議：結構過窄（支撐壓力間距偏小）｜改看 20 日 "
             f"{sup:.2f}–{res:.2f}｜暫不硬做區間，等突破或跌破再定義"
-            f"{ma_tail}"
+            f"{ma_tail}{fib_tail}"
         )
 
     entry_lo = sup
@@ -212,33 +284,39 @@ def make_suggestion(r):
     stop = sup * 0.99
     mid = (sup + res) / 2
 
+    # 若有 Fib 帶，進場區可與 Fib 交集提示
+    if fib and "帶內" in fib_pos:
+        entry_lo = max(entry_lo, fib["zone_lo"])
+        entry_hi = min(max(entry_hi, fib["zone_lo"]), fib["zone_hi"])
+
     if event == "跌破5日低":
         return (
             f"建議：偏弱，先觀望｜等站回 {sup:.2f}–{entry_hi:.2f} 再考慮｜未站回不追"
-            f"{ma_tail}"
+            f"{ma_tail}{fib_tail}"
         )
     if event == "突破5日高":
         return (
             f"建議：偏強｜回測 {sup:.2f}–{px:.2f} 可考慮接｜"
-            f"停損 <{stop:.2f}｜目標 {res:.2f}{ma_tail}"
+            f"停損 <{stop:.2f}｜目標 {res:.2f}{ma_tail}{fib_tail}"
         )
     if event == "靠近支撐" or "下軌" in bb:
         return (
             f"建議：偏支撐區｜進 {entry_lo:.2f}–{entry_hi:.2f}｜"
-            f"停損 <{stop:.2f}｜目標 {mid:.2f} / {res:.2f}{ma_tail}"
+            f"停損 <{stop:.2f}｜目標 {mid:.2f} / {res:.2f}{ma_tail}{fib_tail}"
         )
     if event == "靠近壓力" or "上軌" in bb:
         return (
             f"建議：接近壓力，慎追高｜減碼/出場參考 {res * 0.99:.2f}–{res:.2f}｜"
-            f"未突破不追｜回落看 {mid:.2f}{ma_tail}"
+            f"未突破不追｜回落看 {mid:.2f}{ma_tail}{fib_tail}"
         )
     return (
         f"建議：區間中段，等邊緣｜偏多等 {entry_lo:.2f}–{entry_hi:.2f}｜"
-        f"偏出看 {res * 0.99:.2f}–{res:.2f}{ma_tail}"
+        f"偏出看 {res * 0.99:.2f}–{res:.2f}{ma_tail}{fib_tail}"
     )
 
 
-def make_chart_base64(hist, support, resist, ticker):
+def make_chart_base64(hist, support, resist, ticker, fib=None):
+    """K線 + 支撐壓力 + 布林 + MA200 + Fib 0.5–0.618 半透明帶"""
     try:
         close_full = hist["Close"]
         mid_full = close_full.rolling(BB_PERIOD).mean()
@@ -286,6 +364,8 @@ def make_chart_base64(hist, support, resist, ticker):
             if col in df and df[col].notna().any():
                 extra.append(float(df[col].min()))
                 extra.append(float(df[col].max()))
+        if fib:
+            extra.extend([fib["zone_lo"], fib["zone_hi"], fib["swing_low"], fib["swing_high"]])
         if extra:
             lo = min(lo, min(extra))
             hi = max(hi, max(extra))
@@ -318,20 +398,37 @@ def make_chart_base64(hist, support, resist, ticker):
             ylabel_lower="Vol",
             figratio=(12, 7),
             figscale=1.05,
-            savefig=dict(
-                fname=buf, dpi=110, bbox_inches="tight", facecolor="#0f1115", pad_inches=0.2
-            ),
             tight_layout=True,
             update_width_config=dict(candle_linewidth=0.8),
             ylim=(y_lo, y_hi),
             scale_padding=dict(top=0.15, bottom=0.25, left=0.12, right=0.12),
+            returnfig=True,
         )
         if apds:
             plot_kwargs["addplot"] = apds
         if hlines:
             plot_kwargs["hlines"] = hlines
 
-        mpf.plot(df, **plot_kwargs)
+        fig, axes = mpf.plot(df, **plot_kwargs)
+        ax = axes[0] if isinstance(axes, (list, np.ndarray)) else axes
+
+        # Fib 0.5–0.618 半透明帶 + 邊界線
+        if fib is not None:
+            zlo, zhi = fib["zone_lo"], fib["zone_hi"]
+            ax.axhspan(zlo, zhi, facecolor="#a371f7", alpha=0.18, zorder=0)
+            ax.axhline(fib["fib50"], color="#a371f7", linestyle="--", linewidth=1.0, alpha=0.85)
+            ax.axhline(fib["fib618"], color="#a371f7", linestyle="--", linewidth=1.0, alpha=0.85)
+
+        fig.savefig(
+            buf,
+            dpi=110,
+            bbox_inches="tight",
+            facecolor="#0f1115",
+            pad_inches=0.2,
+        )
+        import matplotlib.pyplot as plt
+
+        plt.close(fig)
         buf.seek(0)
         return base64.b64encode(buf.getvalue()).decode("ascii")
     except Exception as e:
@@ -381,6 +478,9 @@ def analyze(ticker, hist):
     slope = linear_slope(close.iloc[-12:])
     channel = channel_label(slope)
 
+    fib = calc_fib_60(hist, FIB_DAYS)
+    fib_pos = fib_position_label(price, fib)
+
     if len(high) > SHORT_DAYS:
         prev_hi = float(high.iloc[-SHORT_DAYS - 1 : -1].max())
         prev_lo = float(low.iloc[-SHORT_DAYS - 1 : -1].min())
@@ -419,6 +519,8 @@ def analyze(ticker, hist):
     else:
         stats, side = None, None
 
+    in_fib = fib is not None and "帶內" in fib_pos
+
     r = {
         "ticker": ticker,
         "price": price,
@@ -439,15 +541,17 @@ def analyze(ticker, hist):
         "ma200": ma200,
         "ma20_slope_lbl": ma_slope_label(ma20_slope),
         "ma200_slope_lbl": ma_slope_label(ma200_slope),
+        "fib": fib,
+        "fib_pos": fib_pos,
+        "in_fib": in_fib,
         "stats": stats,
         "side": side,
         "hist": hist,
     }
     r["ma_note"] = make_ma_note(r)
+    r["fib_note"] = make_fib_note(r)
     r["suggestion"] = make_suggestion(r)
-    r["focus"] = (
-        near_sup or near_res or breakout or breakdown or narrow
-    )
+    r["focus"] = near_sup or near_res or breakout or breakdown or narrow or in_fib
     return r
 
 
@@ -471,6 +575,7 @@ def build_html(results, now_str):
     up = [r["ticker"] for r in results if "上軌" in r["bb_label"]]
     dn = [r["ticker"] for r in results if "下軌" in r["bb_label"]]
     narrow_list = [r["ticker"] for r in results if r.get("narrow")]
+    fib_in = [r["ticker"] for r in results if r.get("in_fib")]
     focus = [r for r in results if r.get("focus")]
     above_both = [
         r["ticker"]
@@ -489,10 +594,11 @@ def build_html(results, now_str):
         and r["price"] < r["ma200"]
     ]
 
-    # 全部都做圖（含非需關注）
     for r in results:
         print(f"chart {r['ticker']} ...")
-        r["chart"] = make_chart_base64(r["hist"], r["support"], r["resist"], r["ticker"])
+        r["chart"] = make_chart_base64(
+            r["hist"], r["support"], r["resist"], r["ticker"], fib=r.get("fib")
+        )
 
     def card_html(r, badge=None):
         stat = ""
@@ -515,14 +621,13 @@ def build_html(results, now_str):
                 f'<span class="lg-res">┅ 壓力</span>'
                 f'<span class="lg-bb">━ 布林</span>'
                 f'<span class="lg-ma200">━ MA200</span>'
+                f'<span class="lg-fib">▓▓ Fib0.5–0.618</span>'
                 f"</div>"
             )
         else:
             chart_html = '<div class="chart miss">（圖表產生失敗）</div>'
 
-        badge_html = ""
-        if badge:
-            badge_html = f'<span class="badge-mini">{html.escape(badge)}</span>'
+        badge_html = f'<span class="badge-mini">{html.escape(badge)}</span>' if badge else ""
 
         return f"""
 <div class="card">
@@ -540,6 +645,7 @@ def build_html(results, now_str):
   {chart_html}
   <div class="sug">↳ {html.escape(r.get('suggestion', ''))}</div>
   <div class="ma">↳ 均線：{html.escape(r.get('ma_note', ''))}</div>
+  <div class="fib">↳ {html.escape(r.get('fib_note', ''))}</div>
   <div class="stat">{html.escape(stat) if stat else ''}</div>
 </div>
 """
@@ -553,22 +659,27 @@ def build_html(results, now_str):
         cls = event_class(r["event"])
         ma20_txt = f"{r['ma20']:.2f}" if r.get("ma20") is not None else "—"
         ma200_txt = f"{r['ma200']:.2f}" if r.get("ma200") is not None else "—"
+        if r.get("fib"):
+            fib_txt = f"{r['fib']['zone_lo']:.2f}–{r['fib']['zone_hi']:.2f}"
+        else:
+            fib_txt = "—"
         rows.append(
             f"""<tr class="{cls}">
             <td><b>{html.escape(r['ticker'])}</b></td>
             <td class="num">{r['price']:.2f}</td>
             <td class="num">{r['support']:.2f}</td>
-            <td class="num">{r['dist_sup']:+.1f}%</td>
             <td class="num">{r['resist']:.2f}</td>
-            <td class="num">{r['dist_res']:+.1f}%</td>
-            <td>{html.escape(r['channel'])}</td>
+            <td class="num">{fib_txt}</td>
+            <td>{html.escape(r.get('fib_pos') or '—')}</td>
             <td>{html.escape(r['event'])}</td>
             <td>{html.escape(r['bb_label'])}</td>
             <td class="num">{ma20_txt}</td>
             <td class="num">{ma200_txt}</td>
             <td>{html.escape(r['vol_desc'])}</td>
             </tr>
-            <tr class="suggest"><td colspan="12">↳ {html.escape(r.get('suggestion', ''))}<br/>↳ 均線：{html.escape(r.get('ma_note', ''))}</td></tr>"""
+            <tr class="suggest"><td colspan="11">↳ {html.escape(r.get('suggestion', ''))}<br/>
+            ↳ 均線：{html.escape(r.get('ma_note', ''))}<br/>
+            ↳ {html.escape(r.get('fib_note', ''))}</td></tr>"""
         )
 
     return f"""<!DOCTYPE html>
@@ -634,11 +745,13 @@ h2 {{
 .lg-res {{ color: #f0c14b; font-weight: 600; }}
 .lg-bb {{ color: #c9d1d9; }}
 .lg-ma200 {{ color: #ff7b72; }}
+.lg-fib {{ color: #a371f7; font-weight: 600; }}
 .sug {{ color: #9ecbff; font-size: 11px; line-height: 1.35; margin-top: 6px; }}
 .ma {{ color: #7ee787; font-size: 11px; line-height: 1.35; margin-top: 4px; }}
+.fib {{ color: #d2a8ff; font-size: 11px; line-height: 1.35; margin-top: 4px; }}
 .stat {{ color: #8b949e; font-size: 11px; margin-top: 4px; }}
 .wrap {{ overflow-x: auto; -webkit-overflow-scrolling: touch; }}
-table {{ border-collapse: collapse; width: 100%; min-width: 820px; font-size: 13px; }}
+table {{ border-collapse: collapse; width: 100%; min-width: 900px; font-size: 13px; }}
 th, td {{ border-bottom: 1px solid #2a2f3a; padding: 8px 6px; text-align: left; }}
 th {{
   color: #9aa0a6; font-weight: 600; position: sticky; top: 0;
@@ -659,8 +772,8 @@ tr.suggest td {{
 </style>
 </head>
 <body>
-<h1>關鍵位 + 布林 + 均線 <span class="badge">全檔K線</span></h1>
-<div class="meta">產生時間：{html.escape(now_str)}（台灣時間） · 共 {len(results)} 檔 · 需關注 {len(focus)} · 每檔皆有圖</div>
+<h1>關鍵位 + 布林 + 均線 + Fib <span class="badge">全檔K線</span></h1>
+<div class="meta">產生時間：{html.escape(now_str)}（台灣時間） · 共 {len(results)} 檔 · Fib＝近{FIB_DAYS}日波段 0.5–0.618 半透明帶</div>
 
 <h2>摘要</h2>
 <div class="summary">
@@ -668,6 +781,7 @@ tr.suggest td {{
   <span>跌破5日低：{", ".join(bd) if bd else "無"}</span>
   <span>布林上軌：{", ".join(up) if up else "無"}</span>
   <span>布林下軌：{", ".join(dn) if dn else "無"}</span>
+  <span>Fib帶內：{", ".join(fib_in) if fib_in else "無"}</span>
   <span>結構過窄：{", ".join(narrow_list) if narrow_list else "無"}</span>
   <span>站上MA20+200：{", ".join(above_both) if above_both else "無"}</span>
   <span>低於MA20+200：{", ".join(below_both) if below_both else "無"}</span>
@@ -679,6 +793,7 @@ tr.suggest td {{
   <i style="background:#f0c14b"></i>壓力
   <i style="background:#c9d1d9"></i>布林
   <i style="background:#ff7b72"></i>MA200
+  <i style="background:#a371f7"></i>Fib 0.5–0.618
 </div>
 
 <h2>需關注</h2>
@@ -691,8 +806,8 @@ tr.suggest td {{
 <div class="wrap">
 <table>
 <thead><tr>
-<th>代號</th><th>現價</th><th>支撐</th><th>距%</th><th>壓力</th><th>距%</th>
-<th>通道</th><th>狀態</th><th>布林</th><th>MA20</th><th>MA200</th><th>量能</th>
+<th>代號</th><th>現價</th><th>支撐</th><th>壓力</th><th>Fib帶</th><th>Fib位置</th>
+<th>狀態</th><th>布林</th><th>MA20</th><th>MA200</th><th>量能</th>
 </tr></thead>
 <tbody>
 {''.join(rows)}
@@ -701,7 +816,7 @@ tr.suggest td {{
 </div>
 
 <div class="footer">
-資料來源 yfinance · 全檔含K線 · 非投資建議 · report_charts.html
+Fib：近60日高低回撤 0.5–0.618（半透明紫帶）· 波段&lt;{FIB_MIN_SPAN_PCT}%不計 · 非投資建議 · report_charts.html
 </div>
 </body>
 </html>
