@@ -44,7 +44,7 @@ FIB60_COLOR = "#a371f7"
 FIB20_COLOR = "#39c5cf"
 
 
-def get_history(ticker)::
+def get_history(ticker):
     try:
         t = yf.Ticker(ticker)
         hist = t.history(period="2y", auto_adjust=True)
