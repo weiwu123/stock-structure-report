@@ -3,3 +3,4 @@ numpy
 pytz
 matplotlib
 mplfinance
+websocket-client
