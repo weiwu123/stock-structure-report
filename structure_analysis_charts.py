@@ -100,11 +100,15 @@ def ma_slope_label(slope):
 
 def last_ma(series, min_periods):
     s = series.dropna()
-    if len(s) < min_periods:
+
+    if s.empty:
         return None
+
     v = float(s.iloc[-1])
+
     if not np.isfinite(v):
         return None
+
     return v
 
 
