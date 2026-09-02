@@ -140,58 +140,60 @@ def websocket_loop():
 
 def bench(symbol,field): return safe_float(LIVE.get(symbol,{}).get(field))
 
-def score_symbol(ticker,s,live):
-    price=safe_float(live.get('price')) or safe_float(s.get('price'))
-    day=safe_float(live.get('day_pct')); m5=safe_float(live.get('mom_5m')); m10=safe_float(live.get('mom_10m'))
-    rsq=None if day is None or bench('QQQ','day_pct') is None else day-bench('QQQ','day_pct')
-    rss=None if day is None or bench('SMH','day_pct') is None else day-bench('SMH','day_pct')
-    rs5q=None if m5 is None or bench('QQQ','mom_5m') is None else m5-bench('QQQ','mom_5m')
-    rs5s=None if m5 is None or bench('SMH','mom_5m') is None else m5-bench('SMH','mom_5m')
-    add=50.; risk=50.; ra=[]; rr=[]
-    sup=safe_float(s.get('support')); res=safe_float(s.get('resistance')); ma20=safe_float(s.get('ma20')); ma200=safe_float(s.get('ma200'))
-    if s.get('near_support'): add+=10; ra.append('近支撐')
-    if s.get('near_resistance'): add-=5; risk+=6; rr.append('近壓力')
-    if s.get('breakout'): add+=12; ra.append('日K突破')
-    if s.get('breakdown'): add-=18; risk+=18; rr.append('日K跌破')
-    ch=str(s.get('channel') or '')
-    if '上' in ch: add+=6; risk-=4; ra.append('上升結構')
-    elif '下' in ch: add-=7; risk+=8; rr.append('下降結構')
-    if price is not None and ma20 is not None:
-        if price>=ma20: add+=6
-        else: add-=5; risk+=5; rr.append('低於MA20')
-    if price is not None and ma200 is not None:
-        if price>=ma200: add+=7; risk-=4; ra.append('高於MA200')
-        else: add-=9; risk+=10; rr.append('低於MA200')
-    if price is not None and sup:
-        ds=((price/sup)-1)*100
-        if -1<=ds<=2: add+=7; ra.append('貼近支撐')
-        if ds<-1: add-=10; risk+=12; rr.append('跌破支撐')
-    if m5 is not None:
-        if m5>=0.6: add+=9; ra.append('5m強')
-        elif m5>=0.2: add+=4
-        elif m5<=-0.6: add-=9; risk+=10; rr.append('5m弱')
-        elif m5<=-0.2: add-=4; risk+=4
-    if m10 is not None:
-        if m10>=1.0: add+=9; ra.append('10m強')
-        elif m10>=0.4: add+=4
-        elif m10<=-1.0: add-=9; risk+=10; rr.append('10m弱')
-        elif m10<=-0.4: add-=4; risk+=4
-    for val,label in [(rsq,'強於QQQ'),(rss,'強於SMH')]:
-        if val is not None:
-            if val>=1: add+=8; ra.append(label)
-            elif val>=0.4: add+=4
-            elif val<=-1: add-=8; risk+=8; rr.append(label.replace('強於','弱於'))
-            elif val<=-0.4: add-=4; risk+=4
-    for val,label in [(rs5q,'5m強於QQQ'),(rs5s,'5m強於SMH')]:
-        if val is not None:
-            if val>=0.5: add+=5; ra.append(label)
-            elif val<=-0.5: add-=5; risk+=5; rr.append(label.replace('強於','弱於'))
-    add=clamp(round(add)); risk=clamp(round(risk))
-    if risk>=78 and add<=42: signal='SHORT'; score=risk
-    elif risk>=65 and add<=52: signal='REDUCE'; score=risk
-    elif add>=72 and risk<65: signal='ADD'; score=add
-    else: signal='HOLD'; score=max(add,100-risk)
-    return {'signal':signal,'score':int(clamp(score)),'add_score':int(add),'risk_score':int(risk),'rs_qqq':rsq,'rs_smh':rss,'rs5_qqq':rs5q,'rs5_smh':rs5s,'reasons_add':ra[:4],'reasons_risk':rr[:4]}
+def position_guidance(ticker, s, live):
+    price=safe_float(live.get("price")) or safe_float(s.get("price"))
+    day=safe_float(live.get("day_pct")); m5=safe_float(live.get("mom_5m")); m10=safe_float(live.get("mom_10m"))
+    sup=safe_float(s.get("support")); res=safe_float(s.get("resistance"))
+    ma20=safe_float(s.get("ma20")); ma200=safe_float(s.get("ma200"))
+    q5=bench("QQQ","mom_5m"); h5=bench("SMH","mom_5m")
+    rq=None if m5 is None or q5 is None else m5-q5
+    rs=None if m5 is None or h5 is None else m5-h5
+
+    buy_low=sup
+    buy_high=sup*1.015 if sup else None
+    invalid=sup*0.985 if sup else None
+    ds=None if price is None or sup is None else (price/sup-1)*100
+    dr=None if price is None or res is None else (res/price-1)*100
+
+    turn=m5 is not None and m5>=0.15 and (m10 is None or m5>=m10/2)
+    rv=[x for x in (rq,rs) if x is not None]
+    rel=bool(rv) and max(rv)>=0.15
+
+    now="觀察"; detail="等待價格接近明確結構位置。"; priority=40
+    if price is None or sup is None:
+        now="資料不足"; detail="缺少即時價格或支撐資料。"; priority=0
+    elif price<invalid:
+        now="結構失效・不接"; detail=f"明顯跌破支撐 {sup:.2f}；先等重新站回支撐。"; priority=100
+    elif price<sup:
+        now="跌破支撐・等收復"; detail=f"在支撐 {sup:.2f} 下方；不要因跌深直接接，先等收復。"; priority=95
+    elif price<=buy_high:
+        if turn and rel:
+            now="接區確認・可分批"; detail="已到接區，5m止跌轉強且相對QQQ/SMH不弱；可考慮小量分批。"; priority=90
+        elif turn:
+            now="可小量試接"; detail="已到接區且5m開始止跌轉強；相對強弱尚未完全確認。"; priority=85
+        else:
+            now="已進接區・等止跌"; detail="位置到了，但動能尚未確認；等5m轉正/止跌，不盲接。"; priority=80
+    elif ds is not None and ds<=4:
+        now="接近接區・準備"; detail=f"距支撐約 {ds:.1f}%；等進入 {buy_low:.2f}–{buy_high:.2f}。"; priority=70
+    elif res is not None and dr is not None and 0<=dr<=1.5:
+        now="近壓力・不要追"; detail=f"距壓力 {res:.2f} 很近；新倉不追，已有持股觀察突破或減碼。"; priority=75
+    elif s.get("breakout") and res is not None and price>=res:
+        now="突破・等回踩"; detail=f"已突破原壓力 {res:.2f}；不追高，優先等回踩站穩。"; priority=72
+    elif ds is not None and ds>4:
+        now="離接區尚遠"; detail=f"目前離支撐約 {ds:.1f}%；先等，不因盤中下跌就提前接。"; priority=35
+
+    overhead=[]
+    if price is not None:
+        for label,val in (("壓力",res),("MA20",ma20),("MA200",ma200)):
+            if val is not None and val>price: overhead.append((val,label))
+    overhead.sort()
+    nr=overhead[0][0] if overhead else res
+    nl=overhead[0][1] if overhead else ("壓力" if res else None)
+    return {"now":now,"detail":detail,"priority":priority,"buy_low":buy_low,"buy_high":buy_high,
+            "invalid":invalid,"dist_support_pct":ds,"dist_resistance_pct":dr,
+            "next_resistance":nr,"next_resistance_label":nl,"rs5_qqq":rq,"rs5_smh":rs,
+            "momentum_turn":turn,"relative_ok":rel,"day_pct":day}
+
 
 def live_snapshot():
     structure=load_structure_data()
@@ -200,20 +202,17 @@ def live_snapshot():
     scores={t:score_symbol(t,s,live.get(t,{})) for t,s in structure.get('symbols',{}).items()}
     return {'ok':True,'websocket':ws,'symbols':live,'scores':scores,'server_time':time.time()}
 
-HTML='''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Live Dashboard</title>
-<style>body{font-family:Segoe UI,Arial;background:#0d1117;color:#e6edf3;margin:0}.wrap{max-width:1700px;margin:auto;padding:20px}.status,.card,table{background:#161b22;border:1px solid #30363d}.status{padding:10px;border-radius:8px;margin:12px 0}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}.card{padding:12px;border-radius:8px}.n{font-size:24px;font-weight:800}.good{color:#3fb950}.bad{color:#f85149}.warn{color:#d29922}.muted{color:#8b949e}.bench{display:inline-block;background:#161b22;border:1px solid #30363d;padding:7px 10px;border-radius:8px;margin:0 6px 10px 0}table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px solid #30363d;text-align:right;font-size:13px}th{background:#1f2630;position:sticky;top:0}th:first-child,td:first-child,th:nth-child(2),td:nth-child(2),td:last-child{text-align:left}.signal{font-weight:800}.reason{white-space:normal;max-width:320px}input,select{background:#161b22;color:#e6edf3;border:1px solid #30363d;padding:8px;border-radius:7px;margin-right:8px}</style></head><body><div class="wrap">
-<h1>Stock Structure Live Dashboard</h1><div id="sub" class="muted"></div><div><input id="search" placeholder="Ticker"><select id="filter"><option value="all">全部</option><option>ADD</option><option>HOLD</option><option>REDUCE</option><option>SHORT</option></select></div><div id="status" class="status">載入中...</div><div id="bench"></div>
-<div class="cards"><div class="card"><div id="a" class="n good">0</div>ADD</div><div class="card"><div id="h" class="n">0</div>HOLD</div><div class="card"><div id="r" class="n warn">0</div>REDUCE</div><div class="card"><div id="s" class="n bad">0</div>SHORT</div></div>
-<table><thead><tr><th>Ticker</th><th>Signal</th><th>Score</th><th>Live</th><th>Day %</th><th>5m %</th><th>10m %</th><th>vs QQQ</th><th>vs SMH</th><th>Support</th><th>Resistance</th><th>Why</th></tr></thead><tbody id="rows"></tbody></table></div>
-<script>
-let st=[],lv={},sc={};function f(v){return v==null?'—':Number(v).toFixed(2)}function pc(v){return v>0?'good':v<0?'bad':''}function sigc(v){return v==='ADD'?'good':v==='SHORT'?'bad':v==='REDUCE'?'warn':''}
-function merged(){return st.map(x=>{let l=lv[x.ticker]||{},z=sc[x.ticker]||{};return {...x,live:l.price,day:l.day_pct,m5:l.mom_5m,m10:l.mom_10m,signal:z.signal||'HOLD',score:z.score||0,rsq:z.rs_qqq,rss:z.rs_smh,why:[...(z.reasons_add||[]),...(z.reasons_risk||[])].slice(0,5).join(' / ')}})}
-function render(){let q=document.getElementById('search').value.toUpperCase(),fl=document.getElementById('filter').value;let x=merged().filter(o=>(!q||o.ticker.includes(q))&&(fl==='all'||o.signal===fl)).sort((a,b)=>b.score-a.score);document.getElementById('rows').innerHTML=x.map(o=>`<tr><td><b>${o.ticker}</b></td><td class="signal ${sigc(o.signal)}">${o.signal}</td><td class="${sigc(o.signal)}"><b>${o.score}</b></td><td>${f(o.live)}</td><td class="${pc(o.day)}">${f(o.day)}${o.day==null?'':'%'}</td><td class="${pc(o.m5)}">${f(o.m5)}${o.m5==null?'':'%'}</td><td class="${pc(o.m10)}">${f(o.m10)}${o.m10==null?'':'%'}</td><td class="${pc(o.rsq)}">${f(o.rsq)}${o.rsq==null?'':'%'}</td><td class="${pc(o.rss)}">${f(o.rss)}${o.rss==null?'':'%'}</td><td>${f(o.support)}</td><td>${f(o.resistance)}</td><td class="reason">${o.why}</td></tr>`).join('');let all=merged();a.textContent=all.filter(o=>o.signal==='ADD').length;h.textContent=all.filter(o=>o.signal==='HOLD').length;r.textContent=all.filter(o=>o.signal==='REDUCE').length;s.textContent=all.filter(o=>o.signal==='SHORT').length}
-async function rs(){let d=await (await fetch('/api/structure?'+Date.now())).json();if(d.ok){st=Object.entries(d.symbols).map(([ticker,x])=>({ticker,...x}));sub.textContent=`Structure: ${d.generated_at||'—'} (${d.timezone||'—'})`;render()}}
-async function rl(){let d=await (await fetch('/api/live?'+Date.now())).json();lv=d.symbols||{};sc=d.scores||{};status.textContent=d.websocket?.connected?`Finnhub LIVE connected | ${d.websocket.message||''}`:`Finnhub 尚未連線 | ${d.websocket?.message||''}`;bench.innerHTML=['QQQ','SPY','SMH'].map(t=>{let x=lv[t]||{};return `<span class="bench"><b>${t}</b> ${f(x.price)} <span class="${pc(x.day_pct)}">${f(x.day_pct)}${x.day_pct==null?'':'%'}</span> 5m <span class="${pc(x.mom_5m)}">${f(x.mom_5m)}${x.mom_5m==null?'':'%'}</span></span>`}).join('');render()}
-search.oninput=render;filter.onchange=render;rs();rl();setInterval(rl,2000);setInterval(rs,30000);
-</script></body></html>'''
-
+HTML=r"""<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Structure Entry Dashboard</title>
+<style>:root{color-scheme:dark;--bg:#0d1117;--p:#161b22;--p2:#1f2630;--l:#30363d;--t:#e6edf3;--m:#8b949e;--g:#3fb950;--r:#f85149;--y:#d29922;--b:#58a6ff}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font-family:Segoe UI,Noto Sans TC,Arial,sans-serif}.wrap{max-width:1800px;margin:auto;padding:20px}.head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:end}h1{margin:0}.sub,.muted{color:var(--m)}input,select{background:var(--p);color:var(--t);border:1px solid var(--l);padding:9px;border-radius:8px}.status{margin:14px 0;padding:10px;background:var(--p);border:1px solid var(--l);border-radius:9px}.bench{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.bench span{background:var(--p);border:1px solid var(--l);padding:7px 10px;border-radius:8px}table{width:100%;border-collapse:separate;border-spacing:0;background:var(--p);border:1px solid var(--l);border-radius:10px;overflow:hidden}th,td{padding:8px;border-bottom:1px solid var(--l);font-size:13px;text-align:right;white-space:nowrap}th{background:var(--p2);position:sticky;top:0;cursor:pointer}th:first-child,td:first-child,th:nth-child(2),td:nth-child(2),th:last-child,td:last-child{text-align:left}.good{color:var(--g)}.bad{color:var(--r)}.warn{color:var(--y)}.blue{color:var(--b)}.ticker{font-weight:800}.now{font-weight:800}.detail{white-space:normal;min-width:320px;max-width:440px;line-height:1.35}.controls{display:flex;gap:8px}.wraptable{overflow:auto}</style></head>
+<body><div class="wrap"><div class="head"><div><h1>Structure Entry Dashboard</h1><div id="sub" class="sub">loading...</div></div><div class="controls"><input id="q" placeholder="搜尋 ticker"><select id="f"><option value="all">全部</option><option value="接">接區相關</option><option value="跌破">跌破/失效</option><option value="壓力">近壓力</option><option value="等待">等待</option></select></div></div><div id="status" class="status">loading...</div><div id="bench" class="bench"></div>
+<div class="wraptable"><table><thead><tr><th data-k="ticker">Ticker</th><th data-k="now">NOW</th><th data-k="priority">Priority</th><th data-k="live">Live</th><th data-k="day">Day%</th><th data-k="m5">5m%</th><th data-k="ds">距支撐%</th><th>接區</th><th>失效</th><th>下一壓力</th><th data-k="rq">5m vs QQQ</th><th data-k="rs">5m vs SMH</th><th>當下訊息</th></tr></thead><tbody id="rows"></tbody></table></div></div>
+<script>let S=[],L={},G={},key="priority",asc=false;const fmt=(v,d=2)=>v==null?"—":Number(v).toFixed(d);const esc=s=>String(s??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");const pc=v=>v==null?"muted":v>0?"good":v<0?"bad":"";const nc=s=>s.includes("失效")||s.includes("跌破")?"bad":s.includes("可")||s.includes("確認")?"good":s.includes("接區")||s.includes("準備")?"blue":s.includes("壓力")?"warn":"";
+function merge(){return S.map(x=>{let l=L[x.ticker]||{},g=G[x.ticker]||{};return {...x,...g,live:l.price??null,day:l.day_pct??null,m5:l.mom_5m??null,rq:g.rs5_qqq??null,rs:g.rs5_smh??null,ds:g.dist_support_pct??null}})}
+function filt(a){let q=document.getElementById("q").value.trim().toUpperCase(),f=document.getElementById("f").value;return a.filter(x=>{if(q&&!x.ticker.includes(q))return false;if(f==="接"&&!(/接|準備/.test(x.now)))return false;if(f==="跌破"&&!(/跌破|失效/.test(x.now)))return false;if(f==="壓力"&&!x.now.includes("壓力"))return false;if(f==="等待"&&!(/等|遠/.test(x.now)))return false;return true})}
+function render(){let a=filt(merge());a.sort((x,y)=>{let A=x[key],B=y[key];if(typeof A==="number"&&typeof B==="number")return asc?A-B:B-A;return asc?String(A??"").localeCompare(String(B??"")):String(B??"").localeCompare(String(A??""))});document.getElementById("rows").innerHTML=a.map(x=>`<tr><td class="ticker">${esc(x.ticker)}</td><td class="now ${nc(x.now||"")}">${esc(x.now||"—")}</td><td>${x.priority??0}</td><td>${fmt(x.live)}</td><td class="${pc(x.day)}">${fmt(x.day)}${x.day==null?"":"%"}</td><td class="${pc(x.m5)}">${fmt(x.m5)}${x.m5==null?"":"%"}</td><td class="${pc(x.ds)}">${fmt(x.ds)}${x.ds==null?"":"%"}</td><td>${x.buy_low==null?"—":fmt(x.buy_low)+" – "+fmt(x.buy_high)}</td><td class="bad">${fmt(x.invalid)}</td><td>${x.next_resistance==null?"—":esc(x.next_resistance_label||"")+" "+fmt(x.next_resistance)}</td><td class="${pc(x.rq)}">${fmt(x.rq)}${x.rq==null?"":"%"}</td><td class="${pc(x.rs)}">${fmt(x.rs)}${x.rs==null?"":"%"}</td><td class="detail">${esc(x.detail||"")}</td></tr>`).join("")}
+async function structure(){let d=await(await fetch("/api/structure?_="+Date.now())).json();if(d.ok){S=Object.entries(d.symbols).map(([ticker,x])=>({ticker,...x}));document.getElementById("sub").textContent=`Structure: ${d.generated_at||"—"} (${d.timezone||"—"})`;render()}}
+async function live(){try{let d=await(await fetch("/api/live?_="+Date.now())).json();L=d.symbols||{};G=d.scores||{};let w=d.websocket||{};document.getElementById("status").textContent=w.connected?`Finnhub LIVE connected｜${w.message||""}`:`Finnhub 尚未連線｜${w.message||""}`;document.getElementById("bench").innerHTML=["QQQ","SPY","SMH"].map(t=>{let z=L[t]||{};return `<span><b>${t}</b> ${fmt(z.price)} <i class="${pc(z.day_pct)}">${fmt(z.day_pct)}%</i> 5m <i class="${pc(z.mom_5m)}">${fmt(z.mom_5m)}%</i></span>`}).join("");render()}catch(e){document.getElementById("status").textContent="Live API error: "+e}}
+document.getElementById("q").addEventListener("input",render);document.getElementById("f").addEventListener("change",render);document.querySelectorAll("th[data-k]").forEach(h=>h.onclick=()=>{let k=h.dataset.k;if(key===k)asc=!asc;else{key=k;asc=true}render()});structure();live();setInterval(live,2000);setInterval(structure,30000);</script></body></html>"""
 class DashboardHandler(BaseHTTPRequestHandler):
     def sendb(self,b,ct,status=200):
         self.send_response(status); self.send_header('Content-Type',ct); self.send_header('Content-Length',str(len(b))); self.send_header('Cache-Control','no-store'); self.end_headers(); self.wfile.write(b)
