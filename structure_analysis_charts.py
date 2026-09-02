@@ -44,10 +44,10 @@ FIB60_COLOR = "#a371f7"
 FIB20_COLOR = "#39c5cf"
 
 
-def get_history(ticker, days=320):
+def get_history(ticker)::
     try:
         t = yf.Ticker(ticker)
-        hist = t.history(period=f"{days}d", auto_adjust=True)
+        hist = t.history(period="2y", auto_adjust=True)
         if hist is None or hist.empty or len(hist) < CTX_DAYS + 15:
             return None
         if isinstance(hist.columns, pd.MultiIndex):
