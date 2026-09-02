@@ -17,7 +17,7 @@ except ImportError:
 HOST = "0.0.0.0"; PORT = int(os.environ.get("PORT", "8765"))
 BASE_DIR=Path(__file__).resolve().parent
 STRUCTURE_JSON=BASE_DIR/'structure_data.json'
-INTRADAY_STATE_JSON=BASE_DIR/'intraday_state.json'
+INTRADAY_STATE_JSON=BASE_DIR/'data'/'intraday_state.json'
 ET=ZoneInfo('America/New_York')
 PERSIST_EVERY_SEC=5
 MAX_RESTORE_AGE_SEC=18*60*60
