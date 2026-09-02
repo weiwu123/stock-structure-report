@@ -1,0 +1,14 @@
+services:
+  stock-dashboard:
+    build: .
+    container_name: stock-dashboard
+    restart: unless-stopped
+
+    environment:
+      FINNHUB_API_KEY: ${FINNHUB_API_KEY}
+
+    ports:
+      - "8765:8765"
+
+    volumes:
+      - ./intraday_state.json:/app/intraday_state.json
