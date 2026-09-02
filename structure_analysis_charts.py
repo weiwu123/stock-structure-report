@@ -1,6 +1,7 @@
 import io
 import base64
 import html
+import json
 from datetime import datetime
 
 import numpy as np
@@ -834,22 +835,84 @@ Fib20青 / Fib60紫 · 均線已強化抓取 · 非投資建議 · report_charts
 </body>
 </html>
 """
+def build_structure_json(results, now_str):
+    output = {
+        "generated_at": now_str,
+        "timezone": "Asia/Taipei",
+        "symbols": {}
+    }
 
+    for r in results:
+        output["symbols"][r["ticker"]] = {
+            "price": r["price"],
+
+            "support": r["support"],
+            "resistance": r["resist"],
+            "dist_support_pct": r["dist_sup"],
+            "dist_resistance_pct": r["dist_res"],
+
+            "channel": r["channel"],
+            "event": r["event"],
+
+            "breakout": r["breakout"],
+            "breakdown": r["breakdown"],
+            "near_support": r["near_sup"],
+            "near_resistance": r["near_res"],
+            "narrow": r["narrow"],
+
+            "bb_position": r["bb_label"],
+
+            "ma20": r["ma20"],
+            "ma200": r["ma200"],
+            "ma20_slope": r["ma20_slope_lbl"],
+            "ma200_slope": r["ma200_slope_lbl"],
+
+            "fib20": r["fib20"],
+            "fib60": r["fib60"],
+            "fib20_position": r["fib20_pos"],
+            "fib60_position": r["fib60_pos"],
+            "in_fib": r["in_fib"],
+
+            "volume": r["vol_desc"],
+
+            "focus": r["focus"],
+            "suggestion": r["suggestion"],
+        }
+
+    return output
 
 def main():
     now = datetime.now(pytz.timezone("Asia/Taipei"))
     now_str = now.strftime("%Y-%m-%d %H:%M")
     results = []
+
     for t in CORE_LIST:
         hist = get_history(t)
         if hist is None:
             print(f"{t}: skip")
             continue
+
         results.append(analyze(t, hist))
         print(f"ok {t}")
+
+    # 原本 HTML
     with open("report_charts.html", "w", encoding="utf-8") as f:
         f.write(build_html(results, now_str))
+
     print("written report_charts.html")
+
+    # 新增：輸出給 live dashboard 使用的結構資料
+    structure_data = build_structure_json(results, now_str)
+
+    with open("structure_data.json", "w", encoding="utf-8") as f:
+        json.dump(
+            structure_data,
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    print("written structure_data.json")
 
 
 if __name__ == "__main__":
