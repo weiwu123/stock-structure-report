@@ -199,7 +199,7 @@ def live_snapshot():
     structure=load_structure_data()
     with STATE_LOCK:
         live={s:dict(d) for s,d in LIVE.items()}; ws=dict(WS_STATUS)
-    scores={t:score_symbol(t,s,live.get(t,{})) for t,s in structure.get('symbols',{}).items()}
+    scores={t:position_guidance(t,s,live.get(t,{})) for t,s in structure.get('symbols',{}).items()}
     return {'ok':True,'websocket':ws,'symbols':live,'scores':scores,'server_time':time.time()}
 
 HTML=r"""<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Structure Entry Dashboard</title>
