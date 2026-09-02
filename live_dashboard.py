@@ -14,7 +14,7 @@ try:
 except ImportError:
     websocket = None
 
-HOST='127.0.0.1'; PORT=8765
+HOST = "0.0.0.0"; PORT = int(os.environ.get("PORT", "8765"))
 BASE_DIR=Path(__file__).resolve().parent
 STRUCTURE_JSON=BASE_DIR/'structure_data.json'
 INTRADAY_STATE_JSON=BASE_DIR/'intraday_state.json'
