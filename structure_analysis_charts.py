@@ -16,10 +16,16 @@ import matplotlib.pyplot as plt
 import mplfinance as mpf
 
 CORE_LIST = [
-    "AAOI", "AAPL", "AMD", "AMZN", "ANET", "AVGO", "CRWV", "CSCO", "DELL",
-    "FIG", "GOOG", "HPE", "IBM", "INTC", "MRVL", "MSFT", "MU", "MXL",
-    "NBIS", "NET", "NOK", "NOW", "NVDA", "NVTS", "ORCL", "ONDS",
-    "PLTR", "QCOM", "QQQM", "SNOW", "SIMO", "SPCX", "TSLA", "TSM",
+    "AAOI", "AAPL", "AMD", "AMZN", "ANET",
+    "ARM", "AVGO", "CRWV", "CSCO", "DELL",
+    "FIG", "GOOG", "GOOGL", "HPE", "IBM",
+    "INTC", "IONQ", "MRVL", "MSFT", "MU",
+    "MXL", "NBIS", "NET", "NOK", "NOW",
+    "NU", "NVDA", "NVTS", "OKLO", "ONDS",
+    "ORCL", "PLTR", "QBTS", "QCOM", "QQQM",
+    "RCAT", "RGTI", "SIMO", "SMH", "SMR",
+    "SNOW", "SOFI", "SOXL", "SPCX", "TSLA",
+    "TSM", "UUUU", "VIX", "VOO", "VST",
 ]
 
 SHORT_DAYS = 5
