@@ -17,7 +17,7 @@ import mplfinance as mpf
 
 CORE_LIST = [
     "AAOI", "AAPL", "AMD", "AMZN", "ANET",
-    "ARM", "AVGO", "CRWV", "CSCO", "DELL",
+    "ARM", "AVGO", "CRDO", "CRWD", "CRWV", "CSCO", "DELL",
     "FIG", "GOOG", "GOOGL", "HPE", "IBM",
     "INTC", "IONQ", "MRVL", "MSFT", "MU",
     "MXL", "NBIS", "NET", "NOK", "NOW",
