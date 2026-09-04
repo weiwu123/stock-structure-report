@@ -655,7 +655,7 @@ def build_html(results, now_str):
 
         badge_html = f'<span class="badge-mini">{html.escape(badge)}</span>' if badge else ""
         return f"""
-<div class="card">
+<div class="card" id="ticker-{html.escape(r['ticker'])}">
   <div class="card-h">
     <b>{html.escape(r['ticker'])}</b>
     <span class="tag {event_class(r['event'])}">{html.escape(r['event'])}</span>
