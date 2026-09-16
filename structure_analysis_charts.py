@@ -21,6 +21,20 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import mplfinance as mpf
+from matplotlib import font_manager
+
+
+def configure_cjk_font():
+    """Use an installed CJK font so chart titles render Chinese correctly."""
+    candidates = ["Noto Sans CJK TC", "Noto Sans CJK SC", "Microsoft JhengHei", "Microsoft YaHei"]
+    installed = {f.name for f in font_manager.fontManager.ttflist}
+    selected = next((name for name in candidates if name in installed), None)
+    if selected:
+        matplotlib.rcParams["font.sans-serif"] = [selected, "DejaVu Sans"]
+    matplotlib.rcParams["axes.unicode_minus"] = False
+
+
+configure_cjk_font()
 
 CORE_LIST = [
     "AAOI", "AAPL", "AMD", "AMZN", "ANET",
