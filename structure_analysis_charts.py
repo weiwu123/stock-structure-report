@@ -469,8 +469,6 @@ def make_chart_base64(hist, support, resist, ticker, fib20=None, fib60=None):
 
         fig, axes = mpf.plot(df, **plot_kwargs)
         ax = axes[0] if isinstance(axes, (list, np.ndarray)) else axes
-        last_date = pd.Timestamp(df.index[-1]).strftime("%Y-%m-%d")
-        ax.set_title(f"{ticker}｜最後日K：{last_date}", fontsize=12, color="#e6edf3", pad=10)
 
         if fib60 is not None:
             ax.axhspan(fib60["zone_lo"], fib60["zone_hi"], facecolor=FIB60_COLOR, alpha=0.16, zorder=0)
@@ -664,12 +662,9 @@ def build_html(results, now_str):
                 stat = f"{r['side']} → " + " · ".join(parts)
 
         if r.get("chart"):
-            chart_date = pd.Timestamp(r["hist"].index[-1]).strftime("%Y-%m-%d")
-            chart_source = r.get("data_source", "Yahoo Finance")
             chart_html = (
                 f'<div class="chart">'
                 f'<img src="data:image/png;base64,{r["chart"]}" alt="{html.escape(r["ticker"])}"/></div>'
-                f'<div class="chart-meta">最後日K：{chart_date} · 資料來源：{html.escape(chart_source)}</div>'
                 f'<div class="chart-legend">'
                 f'<span class="lg-sup">┅ 支撐</span>'
                 f'<span class="lg-res">┅ 壓力</span>'
