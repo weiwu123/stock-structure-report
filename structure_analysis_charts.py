@@ -455,6 +455,8 @@ def make_chart_base64(hist, support, resist, ticker, fib20=None, fib60=None):
 
         fig, axes = mpf.plot(df, **plot_kwargs)
         ax = axes[0] if isinstance(axes, (list, np.ndarray)) else axes
+        last_date = pd.Timestamp(df.index[-1]).strftime("%Y-%m-%d")
+        ax.set_title(f"{ticker}｜最後日K：{last_date}", fontsize=12, color="#e6edf3", pad=10)
 
         if fib60 is not None:
             ax.axhspan(fib60["zone_lo"], fib60["zone_hi"], facecolor=FIB60_COLOR, alpha=0.16, zorder=0)
@@ -648,9 +650,12 @@ def build_html(results, now_str):
                 stat = f"{r['side']} → " + " · ".join(parts)
 
         if r.get("chart"):
+            chart_date = pd.Timestamp(r["hist"].index[-1]).strftime("%Y-%m-%d")
+            chart_source = r.get("data_source", "Yahoo Finance")
             chart_html = (
                 f'<div class="chart">'
                 f'<img src="data:image/png;base64,{r["chart"]}" alt="{html.escape(r["ticker"])}"/></div>'
+                f'<div class="chart-meta">最後日K：{chart_date} · 資料來源：{html.escape(chart_source)}</div>'
                 f'<div class="chart-legend">'
                 f'<span class="lg-sup">┅ 支撐</span>'
                 f'<span class="lg-res">┅ 壓力</span>'
@@ -675,7 +680,8 @@ def build_html(results, now_str):
   <div class="card-m">
     支撐 {r['support']:.2f}（{r['dist_sup']:+.1f}%） ·
     壓力 {r['resist']:.2f}（{r['dist_res']:+.1f}%） ·
-    {html.escape(r['bb_label'])} · {html.escape(r['channel'])} · {html.escape(r['vol_desc'])}
+    {html.escape(r['bb_label'])} · {html.escape(r['channel'])} · {html.escape(r['vol_desc'])} ·
+    最後日K {pd.Timestamp(r['hist'].index[-1]).strftime('%Y-%m-%d')}
   </div>
   {chart_html}
   <div class="sug">↳ {html.escape(r.get('suggestion', ''))}</div>
@@ -771,6 +777,10 @@ h2 {{ font-size: 1.05rem; margin: 20px 0 8px; border-bottom: 1px solid #333; pad
 .chart img {{
   width: 100%; max-width: 900px; height: auto;
   border-radius: 8px; display: block; background: #0f1115;
+}}
+.chart-meta {{
+  color: #8b949e; font-size: 0.75rem; margin: 5px 0 2px;
+  font-variant-numeric: tabular-nums;
 }}
 .chart.miss {{ color: #6b7280; font-size: 0.8rem; }}
 .chart-legend {{
