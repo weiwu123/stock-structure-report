@@ -2,7 +2,14 @@ import io
 import base64
 import html
 import json
+import os
+import time
 from datetime import datetime
+
+from report_pipeline import (
+    SCHEMA_VERSION, atomic_write, latest_completed_session,
+    read_previous, validate_publication,
+)
 
 import numpy as np
 import pandas as pd
@@ -28,6 +35,9 @@ CORE_LIST = [
     "TSM", "UUUU", "VIX", "VOO", "VST",
 ]
 
+# Keep the public/display symbol stable while using Yahoo's index symbol.
+YAHOO_SYMBOLS = {"VIX": "^VIX"}
+
 SHORT_DAYS = 5
 CTX_DAYS = 20
 FIB20_DAYS = 20
@@ -46,13 +56,13 @@ FIB20_COLOR = "#39c5cf"
 
 def get_history(ticker):
     try:
-        t = yf.Ticker(ticker)
+        t = yf.Ticker(YAHOO_SYMBOLS.get(ticker, ticker))
         hist = t.history(period="2y", auto_adjust=True)
         if hist is None or hist.empty or len(hist) < CTX_DAYS + 15:
             return None
         if isinstance(hist.columns, pd.MultiIndex):
             hist.columns = hist.columns.get_level_values(0)
-        hist = hist[~hist.index.duplicated(keep="last")]
+        hist = hist[~hist.index.duplicated(keep="last")].sort_index()
         need = ["Open", "High", "Low", "Close", "Volume"]
         for c in need:
             if c not in hist.columns:
@@ -845,15 +855,26 @@ Fib20青 / Fib60紫 · 均線已強化抓取 · 非投資建議 · report_charts
 </body>
 </html>
 """
-def build_structure_json(results, now_str):
+def build_structure_json(results, now_str, expected_session=None, failures=None):
     output = {
+        "schema_version": SCHEMA_VERSION,
         "generated_at": now_str,
         "timezone": "Asia/Taipei",
+        "as_of_date": expected_session,
+        "quality": {
+            "status": "partial" if failures else "complete",
+            "expected_count": len(CORE_LIST),
+            "success_count": len(results),
+            "failed_symbols": failures or {},
+        },
         "symbols": {}
     }
 
     for r in results:
         output["symbols"][r["ticker"]] = {
+            "as_of_date": r["hist"].index[-1].date().isoformat(),
+            "history_rows": len(r["hist"]),
+            "data_status": "current",
             "price": r["price"],
 
             "support": r["support"],
@@ -892,37 +913,63 @@ def build_structure_json(results, now_str):
     return output
 
 def main():
-    now = datetime.now(pytz.timezone("Asia/Taipei"))
-    now_str = now.strftime("%Y-%m-%d %H:%M")
+    expected_session = latest_completed_session()
+    previous = read_previous("structure_data.json")
     results = []
+    failures = {}
+    print(f"Required completed trading session: {expected_session}")
 
     for t in CORE_LIST:
-        hist = get_history(t)
-        if hist is None:
-            print(f"{t}: skip")
-            continue
+        for attempt in range(3):
+            try:
+                hist = get_history(t)
+                if hist is None:
+                    raise ValueError("download failed or insufficient history")
+                # Manual runs during trading must not publish an unfinished daily bar.
+                hist = hist.loc[hist.index.strftime("%Y-%m-%d") <= expected_session]
+                if len(hist) < CTX_DAYS + 15:
+                    raise ValueError("insufficient completed history")
+                as_of = hist.index[-1].date().isoformat()
+                if as_of != expected_session:
+                    raise ValueError(f"stale history: {as_of}, expected {expected_session}")
+                prices = hist[["Open", "High", "Low", "Close"]]
+                if not np.isfinite(hist.to_numpy(dtype=float)).all() or (prices <= 0).any().any():
+                    raise ValueError("non-finite or non-positive price data")
+                if (hist["High"] < prices[["Open", "Low", "Close"]].max(axis=1)).any() or (hist["Low"] > prices[["Open", "High", "Close"]].min(axis=1)).any() or (hist["Volume"] < 0).any():
+                    raise ValueError("inconsistent OHLCV data")
+                results.append(analyze(t, hist))
+                print(f"ok {t} ({as_of})")
+                break
+            except Exception as exc:
+                print(f"{t}: attempt {attempt + 1}/3: {exc}")
+                if attempt < 2:
+                    time.sleep(2 ** attempt)
+                else:
+                    failures[t] = str(exc)
 
-        results.append(analyze(t, hist))
-        print(f"ok {t}")
-
-    # 原本 HTML
-    with open("report_charts.html", "w", encoding="utf-8") as f:
-        f.write(build_html(results, now_str))
-
-    print("written report_charts.html")
-
-    # 新增：輸出給 live dashboard 使用的結構資料
-    structure_data = build_structure_json(results, now_str)
-
-    with open("structure_data.json", "w", encoding="utf-8") as f:
-        json.dump(
-            structure_data,
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
-
-    print("written structure_data.json")
+    now_str = datetime.now(pytz.timezone("Asia/Taipei")).strftime("%Y-%m-%d %H:%M")
+    structure_data = build_structure_json(results, now_str, expected_session, failures)
+    try:
+        validate_publication(structure_data, CORE_LIST, expected_session, previous)
+    except ValueError as exc:
+        if os.getenv("GITHUB_STEP_SUMMARY"):
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+                summary.write(f"Publication blocked; previous report retained: {exc}\n\n")
+        raise
+    # Render and serialize before replacing either published output.
+    report_html = build_html(results, now_str)
+    status = f"資料交易日：{expected_session}｜成功 {len(results)}/{len(CORE_LIST)}"
+    if failures:
+        status += "｜缺少資料：" + ", ".join(failures)
+        print(f"::warning::{status}")
+    report_html = report_html.replace("<body>", '<body><p role="status">' + html.escape(status) + "</p>", 1)
+    serialized = json.dumps(structure_data, ensure_ascii=False, indent=2, allow_nan=False)
+    atomic_write("report_charts.html", report_html)
+    atomic_write("structure_data.json", serialized + "\n")
+    print("written report_charts.html and structure_data.json")
+    if os.getenv("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+            summary.write(status + "\n\n")
 
 
 if __name__ == "__main__":

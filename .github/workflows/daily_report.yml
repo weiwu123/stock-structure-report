@@ -2,50 +2,115 @@ name: Daily Structure Report
 
 on:
   schedule:
-    # 台灣時間約 08:02（週二～週六）＝美股週一～週五盤後
-    - cron: "2 0 * * 1-5"
+    # 台灣週二至週六 08:05（美股週一至週五收盤後）。
+    - cron: "5 8 * * 2-6"
+      timezone: "Asia/Taipei"
+    # 08:35 補跑：已完整發布最新交易日資料就跳過。
+    - cron: "35 8 * * 2-6"
+      timezone: "Asia/Taipei"
   workflow_dispatch:
+
+concurrency:
+  group: daily-structure-report
+  cancel-in-progress: false
 
 jobs:
   run-report:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Record actual start time
+        env:
+          TRIGGER: ${{ github.event_name }}
+          CRON: ${{ github.event.schedule }}
+        run: |
+          echo "Trigger: $TRIGGER; cron (Asia/Taipei): $CRON" >> "$GITHUB_STEP_SUMMARY"
+          echo "Actual start (Taipei): $(TZ=Asia/Taipei date '+%Y-%m-%d %H:%M:%S %Z')" >> "$GITHUB_STEP_SUMMARY"
+          echo "Target: Tue-Sat 08:05 Taipei; recovery check: 08:35. GitHub may delay scheduled events." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
+          cache: pip
 
       - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Test publication guards
+        run: python -m unittest discover -s tests -v
+
+      - name: Check whether this session needs an update
+        id: gate
+        env:
+          TRIGGER: ${{ github.event_name }}
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          if [ "$TRIGGER" = "workflow_dispatch" ]; then
+            python report_pipeline.py --force
+          else
+            python report_pipeline.py
+          fi
+
+      - name: Generate and validate structure report
+        if: steps.gate.outputs.run == 'true'
+        run: python structure_analysis_charts.py
 
       - name: Run original analysis
+        id: original
+        if: steps.gate.outputs.run == 'true'
+        continue-on-error: true
+        timeout-minutes: 5
         run: python structure_analysis.py
 
-      - name: Run charts-version analysis
-        run: python structure_analysis_charts.py
-        
       - name: Run live / premarket snapshot
+        id: premarket
+        if: steps.gate.outputs.run == 'true'
+        continue-on-error: true
+        timeout-minutes: 5
         run: python premarket_analysis.py
 
-      - name: Show output files
-        run: ls -la report.html report_charts.html || true
-
-      - name: Commit and push reports
+      - name: Commit and push validated reports
+        if: steps.gate.outputs.run == 'true'
+        env:
+          ORIGINAL_OUTCOME: ${{ steps.original.outcome }}
+          PREMARKET_OUTCOME: ${{ steps.premarket.outcome }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add report.html report_charts.html report_live.html structure_data.json
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
+          git add report_charts.html structure_data.json
+          if [ "$ORIGINAL_OUTCOME" = "success" ]; then
+            git add report.html
           else
-            git commit -m "update reports $(date -u +%Y-%m-%d)"
-            git push
+            git restore -- report.html
+            echo "::warning::Original report failed; retained previous report.html"
           fi
+          if [ "$PREMARKET_OUTCOME" = "success" ]; then
+            git add report_live.html
+          else
+            git restore -- report_live.html
+            echo "::warning::Premarket report failed; retained previous report_live.html"
+          fi
+          if git diff --staged --quiet; then
+            echo "No report changes." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git commit -m "update reports $(date -u +%Y-%m-%d)"
+          for attempt in 1 2 3; do
+            git pull --rebase origin main
+            if git push origin HEAD:main; then
+              echo "Published commit: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Unable to push reports after three attempts"
+          exit 1

@@ -4,3 +4,5 @@ pytz
 matplotlib
 mplfinance
 websocket-client
+pandas
+pandas_market_calendars>=5.1,<6
