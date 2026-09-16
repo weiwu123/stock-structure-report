@@ -7,8 +7,8 @@ import time
 from datetime import datetime
 
 from report_pipeline import (
-    SCHEMA_VERSION, atomic_write, latest_completed_session,
-    read_previous, validate_publication,
+    MIN_COVERAGE, SCHEMA_VERSION, atomic_write, latest_completed_session,
+    read_previous, set_action_output, validate_publication,
 )
 
 import numpy as np
@@ -949,6 +949,23 @@ def main():
 
     now_str = datetime.now(pytz.timezone("Asia/Taipei")).strftime("%Y-%m-%d %H:%M")
     structure_data = build_structure_json(results, now_str, expected_session, failures)
+    coverage = len(results) / len(CORE_LIST)
+    provider_pending = (
+        coverage < MIN_COVERAGE
+        and failures
+        and all(message.startswith("stale history:") for message in failures.values())
+    )
+    if provider_pending:
+        message = (
+            f"行情供應商尚未提供 {expected_session} 完整日 K；"
+            f"目前只有 {len(results)}/{len(CORE_LIST)} 檔更新。保留上一份報告，等待下一次排程。"
+        )
+        print(f"::warning::{message}")
+        set_action_output("published", "false")
+        if os.getenv("GITHUB_STEP_SUMMARY"):
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+                summary.write(message + "\n\n")
+        return
     try:
         validate_publication(structure_data, CORE_LIST, expected_session, previous)
     except ValueError as exc:
@@ -966,6 +983,7 @@ def main():
     serialized = json.dumps(structure_data, ensure_ascii=False, indent=2, allow_nan=False)
     atomic_write("report_charts.html", report_html)
     atomic_write("structure_data.json", serialized + "\n")
+    set_action_output("published", "true")
     print("written report_charts.html and structure_data.json")
     if os.getenv("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:

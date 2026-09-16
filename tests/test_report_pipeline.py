@@ -136,6 +136,14 @@ class ReportIntegrationTests(unittest.TestCase):
             self.assertEqual(Path("structure_data.json").read_text(), '{"symbols": {}}')
             self.assertEqual(Path("report_charts.html").read_text(), "previous chart")
 
+    def test_provider_delay_keeps_previous_files_for_scheduled_retry(self):
+        stale = self.hist.loc[self.hist.index.strftime("%Y-%m-%d") <= "2026-09-14"]
+        Path("structure_data.json").write_text('{"symbols": {}}', encoding="utf-8")
+        Path("report_charts.html").write_text("previous chart", encoding="utf-8")
+        self.run_report([stale, stale, stale])
+        self.assertEqual(Path("structure_data.json").read_text(), '{"symbols": {}}')
+        self.assertEqual(Path("report_charts.html").read_text(), "previous chart")
+
 
 if __name__ == "__main__":
     unittest.main()

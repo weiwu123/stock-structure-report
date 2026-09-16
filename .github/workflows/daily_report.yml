@@ -5,8 +5,8 @@ on:
     # 台灣週二至週六 08:05（美股週一至週五收盤後）。
     - cron: "5 8 * * 2-6"
       timezone: "Asia/Taipei"
-    # 08:35 補跑：已完整發布最新交易日資料就跳過。
-    - cron: "35 8 * * 2-6"
+    # Yahoo 日 K 常延後完成；10:05、12:05 補跑，已完整發布就跳過。
+    - cron: "5 10,12 * * 2-6"
       timezone: "Asia/Taipei"
   workflow_dispatch:
 
@@ -35,7 +35,7 @@ jobs:
         run: |
           echo "Trigger: $TRIGGER; cron (Asia/Taipei): $CRON" >> "$GITHUB_STEP_SUMMARY"
           echo "Actual start (Taipei): $(TZ=Asia/Taipei date '+%Y-%m-%d %H:%M:%S %Z')" >> "$GITHUB_STEP_SUMMARY"
-          echo "Target: Tue-Sat 08:05 Taipei; recovery check: 08:35. GitHub may delay scheduled events." >> "$GITHUB_STEP_SUMMARY"
+          echo "Target: Tue-Sat 08:05 Taipei; recovery checks: 10:05 and 12:05. GitHub may delay scheduled events." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -61,25 +61,26 @@ jobs:
           fi
 
       - name: Generate and validate structure report
+        id: structure
         if: steps.gate.outputs.run == 'true'
         run: python structure_analysis_charts.py
 
       - name: Run original analysis
         id: original
-        if: steps.gate.outputs.run == 'true'
+        if: steps.structure.outputs.published == 'true'
         continue-on-error: true
         timeout-minutes: 5
         run: python structure_analysis.py
 
       - name: Run live / premarket snapshot
         id: premarket
-        if: steps.gate.outputs.run == 'true'
+        if: steps.structure.outputs.published == 'true'
         continue-on-error: true
         timeout-minutes: 5
         run: python premarket_analysis.py
 
       - name: Commit and push validated reports
-        if: steps.gate.outputs.run == 'true'
+        if: steps.structure.outputs.published == 'true'
         env:
           ORIGINAL_OUTCOME: ${{ steps.original.outcome }}
           PREMARKET_OUTCOME: ${{ steps.premarket.outcome }}

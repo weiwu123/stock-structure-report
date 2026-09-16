@@ -89,6 +89,12 @@ def atomic_write(path, content):
             temporary.unlink()
 
 
+def set_action_output(name, value):
+    if os.getenv("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"{name}={value}\n")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--force", action="store_true")
@@ -100,9 +106,8 @@ def main():
     should_run = args.force or not current
     message = f"Expected session: {session}; report {'will run' if should_run else 'already complete, skipped'}"
     print(message)
-    if os.getenv("GITHUB_OUTPUT"):
-        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-            output.write(f"run={str(should_run).lower()}\nexpected_session={session}\n")
+    set_action_output("run", str(should_run).lower())
+    set_action_output("expected_session", session)
     if os.getenv("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
             summary.write(message + "\n\n")

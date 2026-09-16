@@ -1,7 +1,7 @@
 # Daily Structure Report
 
 排程明確指定 `Asia/Taipei`：`5 8 * * 2-6`，即台灣週二至週六早上 08:05，
-對應美股週一至週五收盤後。另於 08:35 執行補跑檢查。
+對應美股週一至週五收盤後。另於 10:05、12:05 執行補跑檢查。
 NYSE 交易日曆處理假日、夏令時間與提早收盤；沒有新的交易日且資料已完整時跳過。
 手動 Run workflow 會強制重新產生。
 
@@ -14,6 +14,7 @@ GitHub Actions 的 schedule 可能延遲或漏發，兩個排程都沒有準點�
 - `structure_analysis_charts.py` 輸出 `structure_data.json` 和 `report_charts.html`。
 - 保留既有 JSON 欄位，新增 schema_version、as_of_date、quality，及每檔 history_rows/data_status。
 - 只接受最新已完成交易日的日 K；下載或分析失敗最多嘗試三次。
+- 若 Yahoo 尚未完成當日資料，保留上一份報告並由後續排程重試；不把舊日 K 當成新報告發布。
 - 成功率至少 90%，且上一版已發布、仍在追蹤名單的股票不得消失。
   不符合時執行失敗並保留舊檔，不把過期行情混入新報告。
 - 新追蹤股票若無資料，在未低於門檻時可發布部分結果，但會在 HTML、JSON 與 Actions 標示缺漏。
