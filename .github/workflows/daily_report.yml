@@ -63,6 +63,9 @@ jobs:
       - name: Generate and validate structure report
         id: structure
         if: steps.gate.outputs.run == 'true'
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
         run: python structure_analysis_charts.py
 
       - name: Run original analysis
