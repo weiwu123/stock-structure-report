@@ -4,7 +4,9 @@ import html
 import json
 import os
 import time
-from datetime import datetime
+import urllib.parse
+import urllib.request
+from datetime import datetime, timedelta, timezone
 
 from report_pipeline import (
     MIN_COVERAGE, SCHEMA_VERSION, atomic_write, latest_completed_session,
@@ -51,6 +53,9 @@ CORE_LIST = [
 
 # Keep the public/display symbol stable while using Yahoo's index symbol.
 YAHOO_SYMBOLS = {"VIX": "^VIX"}
+ALPACA_API_KEY = os.environ.get("ALPACA_API_KEY", "").strip()
+ALPACA_SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY", "").strip()
+ALPACA_BARS_URL = "https://data.alpaca.markets/v2/stocks/{symbol}/bars"
 
 SHORT_DAYS = 5
 CTX_DAYS = 20
@@ -68,29 +73,64 @@ FIB60_COLOR = "#a371f7"
 FIB20_COLOR = "#39c5cf"
 
 
-def get_history(ticker):
+def clean_history(hist):
+    """Normalize an OHLCV dataframe returned by a market data provider."""
+    if hist is None or hist.empty or len(hist) < CTX_DAYS + 15:
+        return None
+    if isinstance(hist.columns, pd.MultiIndex):
+        hist.columns = hist.columns.get_level_values(0)
+    hist = hist[~hist.index.duplicated(keep="last")].sort_index()
+    need = ["Open", "High", "Low", "Close", "Volume"]
+    if any(c not in hist.columns for c in need):
+        return None
+    hist = hist[need].copy()
+    for c in need:
+        hist[c] = pd.to_numeric(hist[c], errors="coerce")
+    hist = hist.dropna(how="any")
+    return hist if len(hist) >= CTX_DAYS + 15 else None
+
+
+def get_alpaca_history(ticker):
+    if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
+        raise RuntimeError("Alpaca credentials are missing")
+    params = urllib.parse.urlencode({
+        "timeframe": "1Day",
+        "start": (datetime.now(timezone.utc) - timedelta(days=760)).strftime("%Y-%m-%dT00:00:00Z"),
+        "end": datetime.now(timezone.utc).strftime("%Y-%m-%dT23:59:59Z"),
+        "adjustment": "all", "feed": "iex", "limit": 10000, "sort": "asc",
+    })
+    request = urllib.request.Request(
+        ALPACA_BARS_URL.format(symbol=urllib.parse.quote(ticker)) + "?" + params,
+        headers={"APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY},
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    bars = payload.get("bars") or []
+    if not bars:
+        return None
+    hist = pd.DataFrame(bars).rename(columns={"o":"Open", "h":"High", "l":"Low", "c":"Close", "v":"Volume"})
+    if "t" not in hist:
+        return None
+    # Alpaca timestamps are UTC; convert each bar to its New York trading date.
+    hist.index = pd.to_datetime(hist.pop("t"), utc=True).dt.tz_convert("America/New_York").dt.normalize().dt.tz_localize(None)
+    return clean_history(hist)
+
+
+def get_yahoo_history(ticker):
     try:
         t = yf.Ticker(YAHOO_SYMBOLS.get(ticker, ticker))
         hist = t.history(period="2y", auto_adjust=True)
-        if hist is None or hist.empty or len(hist) < CTX_DAYS + 15:
-            return None
-        if isinstance(hist.columns, pd.MultiIndex):
-            hist.columns = hist.columns.get_level_values(0)
-        hist = hist[~hist.index.duplicated(keep="last")].sort_index()
-        need = ["Open", "High", "Low", "Close", "Volume"]
-        for c in need:
-            if c not in hist.columns:
-                return None
-        hist = hist[need].copy()
-        for c in need:
-            hist[c] = pd.to_numeric(hist[c], errors="coerce")
-        hist = hist.dropna(how="any")
-        if len(hist) < CTX_DAYS + 15:
-            return None
-        return hist
+        return clean_history(hist)
     except Exception as e:
-        print(f"Error {ticker}: {e}")
+        print(f"Yahoo fallback error {ticker}: {e}")
         return None
+
+
+def get_history(ticker):
+    # VIX is an index and is not covered by Alpaca's stock-bars endpoint.
+    if ticker == "VIX":
+        return get_yahoo_history(ticker)
+    return get_alpaca_history(ticker)
 
 
 def linear_slope(series):
