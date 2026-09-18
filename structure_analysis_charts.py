@@ -933,6 +933,10 @@ def build_structure_json(results, now_str, expected_session=None, failures=None)
         output["symbols"][r["ticker"]] = {
             "as_of_date": r["hist"].index[-1].date().isoformat(),
             "history_rows": len(r["hist"]),
+            "previous_close": float(r["hist"]["Close"].iloc[-2]),
+            "previous_close_date": r["hist"].index[-2].date().isoformat(),
+            "last_close": float(r["hist"]["Close"].iloc[-1]),
+            "last_day_change_pct": float((r["hist"]["Close"].iloc[-1] / r["hist"]["Close"].iloc[-2] - 1) * 100),
             "data_status": "current",
             "price": r["price"],
 
