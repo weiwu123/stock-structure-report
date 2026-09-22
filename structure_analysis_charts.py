@@ -48,7 +48,7 @@ CORE_LIST = [
     "ORCL", "PLTR", "QBTS", "QCOM", "QQQM",
     "RCAT", "RGTI", "SIMO", "SMH", "SMR",
     "SNOW", "SOFI", "SOXL", "SPCX", "TSLA",
-    "TSM", "UUUU", "VIX", "VOO", "VST",
+    "TSM", "UUUU", "VIX", "VOO", "VST", "ZS",
 ]
 
 # Keep the public/display symbol stable while using Yahoo's index symbol.
