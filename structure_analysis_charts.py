@@ -23,6 +23,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import mplfinance as mpf
+from fibonacci_structure import analyze as analyze_fibonacci
 from matplotlib import font_manager
 
 
@@ -462,9 +463,6 @@ def make_chart_base64(hist, support, resist, ticker, fib20=None, fib60=None):
         for col in ("ma200", "bb_u", "bb_l"):
             if col in df and df[col].notna().any():
                 extra += [float(df[col].min()), float(df[col].max())]
-        for fib in (fib20, fib60):
-            if fib:
-                extra += [fib["zone_lo"], fib["zone_hi"], fib["swing_low"], fib["swing_high"]]
         if extra:
             lo, hi = min(lo, min(extra)), max(hi, max(extra))
         pad = (hi - lo) * 0.03 if hi > lo else 1.0
@@ -509,15 +507,6 @@ def make_chart_base64(hist, support, resist, ticker, fib20=None, fib60=None):
 
         fig, axes = mpf.plot(df, **plot_kwargs)
         ax = axes[0] if isinstance(axes, (list, np.ndarray)) else axes
-
-        if fib60 is not None:
-            ax.axhspan(fib60["zone_lo"], fib60["zone_hi"], facecolor=FIB60_COLOR, alpha=0.16, zorder=0)
-            ax.axhline(fib60["fib50"], color=FIB60_COLOR, linestyle="--", linewidth=1.0, alpha=0.8)
-            ax.axhline(fib60["fib618"], color=FIB60_COLOR, linestyle="--", linewidth=1.0, alpha=0.8)
-        if fib20 is not None:
-            ax.axhspan(fib20["zone_lo"], fib20["zone_hi"], facecolor=FIB20_COLOR, alpha=0.20, zorder=0)
-            ax.axhline(fib20["fib50"], color=FIB20_COLOR, linestyle=":", linewidth=1.1, alpha=0.9)
-            ax.axhline(fib20["fib618"], color=FIB20_COLOR, linestyle=":", linewidth=1.1, alpha=0.9)
 
         fig.savefig(buf, dpi=110, bbox_inches="tight", facecolor="#0f1115", pad_inches=0.2)
         plt.close(fig)
@@ -669,6 +658,81 @@ def event_class(event):
     return ""
 
 
+def fibonacci_context(hist):
+    """Same completed history and adjustment basis as the adjacent technical chart."""
+    rows = [dict(Date=pd.Timestamp(index).strftime('%Y-%m-%d'),
+                 **{name:float(row[name]) for name in ('Open','High','Low','Close')})
+            for index,row in hist.iterrows()]
+    return analyze_fibonacci(rows)
+
+
+def make_fibonacci_chart(hist, context, ticker):
+    """A separate close-price chart; legacy overlays never return to the left chart."""
+    fig = None
+    try:
+        df = hist.tail(CHART_DAYS)
+        fig, ax = plt.subplots(figsize=(4.8, 4.1), facecolor='#11151c')
+        ax.set_facecolor('#11151c')
+        x = np.arange(len(df))
+        ax.plot(x, df['Close'].to_numpy(dtype=float), color='#c9d1d9', linewidth=1.5)
+        colors = ['#58a6ff','#39c5cf','#a371f7','#f0c14b']
+        if context.get('quality') == 'OK':
+            for (ratio, level), color in zip(context['levels'].items(), colors):
+                ax.axhline(level, color=color, linewidth=.9, linestyle='--', alpha=.85)
+                ax.text(1.015, level, ratio, transform=ax.get_yaxis_transform(),
+                        va='center', fontsize=8, color=color)
+            for key, marker, color in [('low','v','#3dd68c'),('high','^','#ff7b72')]:
+                pivot = context[key]
+                dates = df.index.strftime('%Y-%m-%d').tolist()
+                if pivot['date'] in dates:
+                    ax.scatter([dates.index(pivot['date'])],[pivot['price']],marker=marker,s=40,color=color,zorder=4)
+        positions = np.unique(np.linspace(0,len(df)-1,min(4,len(df))).astype(int))
+        ax.set_xticks(positions, [pd.Timestamp(df.index[i]).strftime('%m/%d') for i in positions])
+        ax.set_xlim(-1,len(df))
+        ax.tick_params(colors='#8b949e',labelsize=8)
+        for spine in ax.spines.values():spine.set_color('#30363d')
+        ax.grid(color='#30363d',alpha=.5,linestyle='--')
+        ax.set_title(ticker+' · Fibonacci',color='#d2a8ff',fontsize=11,loc='left')
+        fig.subplots_adjust(left=.15,right=.85,bottom=.13,top=.9)
+        buf = io.BytesIO()
+        fig.savefig(buf,format='png',dpi=130,facecolor='#11151c')
+        return base64.b64encode(buf.getvalue()).decode('ascii')
+    finally:
+        if fig is not None:plt.close(fig)
+
+
+def fibonacci_panel(row):
+    c = row['fibonacci']
+    quality = c.get('quality','NO_DATA')
+    state = c.get('daily_state','NO_DATA')
+    labels = {'UPTREND':'上升結構','PULLBACK':'回撤觀察','RANGE':'區間整理','BREAKDOWN':'結構跌破','NO_DATA':'資料不足'}
+    reasons = {'INSUFFICIENT_HISTORY':'不足 80 根日線，暫不選定波段',
+               'NO_CONFIRMED_SWING':'尚無符合至少 2 ATR 的已確認波段',
+               'PRICE_DISCONTINUITY':'波段內有大幅跳空，待確認價格／公司行動'}
+    parts = [f'<div class="fib-status"><b>{html.escape(state)}</b><span>{labels.get(state,"等待")}</span></div>']
+    if row.get('fibonacci_chart'):
+        parts.append(f'<div class="chart"><img src="data:image/png;base64,{row["fibonacci_chart"]}" alt="{html.escape(row["ticker"])} Fibonacci 獨立圖"/></div>')
+    if quality == 'OK':
+        parts.append('<div class="fib-prices">'+''.join(
+            f'<div><span>{ratio}</span><b>{level:.2f}</b></div>' for ratio,level in c['levels'].items())+'</div>')
+        low,high=c['low'],c['high']
+        direction='上行波段' if c['direction']=='UP' else '下行波段（反彈位）'
+        parts.append(f'<div class="fib-context">{direction} · 低 {low["price"]:.2f}（{low["date"]}）<br>高 {high["price"]:.2f}（{high["date"]}） · 確認 {c["confirmed_on"]}<br>日線截至 {c["asof_date"]} · 容差 0.25 ATR</div>')
+        refs={name:c.get(name) for name in ('ma20','ma200')}
+        refs.update(support=row['support'],resistance=row['resist'])
+        confluence=[f'{ratio} ≈ {name} {value:.2f}' for ratio,level in c['levels'].items()
+                    for name,value in refs.items() if value is not None and abs(level-value)<=.5*c['atr14']]
+        parts.append('<div class="fib-context">價位匯合：'+html.escape('；'.join(confluence) or '無（0.5 ATR 內）')+'</div>')
+    else:
+        parts.append('<p class="fib-context">'+html.escape(reasons.get(quality,quality))+'</p>')
+    legacy=[]
+    for key in ('fib20','fib60'):
+        fib=row.get(key)
+        if fib:legacy.append(f'{key.upper()} {fib["zone_lo"]:.2f}–{fib["zone_hi"]:.2f}')
+    parts.append('<div class="fib-legacy">原區間參考：'+html.escape(' · '.join(legacy) or '資料不足')+'</div>')
+    return ''.join(parts)
+
+
 def build_html(results, now_str):
     br = [r["ticker"] for r in results if r["breakout"]]
     bd = [r["ticker"] for r in results if r["breakdown"]]
@@ -681,13 +745,14 @@ def build_html(results, now_str):
 
     for r in results:
         print(f"chart {r['ticker']} ...")
+        r["fibonacci"] = fibonacci_context(r["hist"])
+        r["fibonacci_chart"] = make_fibonacci_chart(r["hist"], r["fibonacci"], r["ticker"])
         r["chart"] = make_chart_base64(
             r["hist"],
             r["support"],
             r["resist"],
             r["ticker"],
-            fib20=r.get("fib20"),
-            fib60=r.get("fib60"),
+
         )
 
     def card_html(r, badge=None):
@@ -710,8 +775,6 @@ def build_html(results, now_str):
                 f'<span class="lg-res">┅ 壓力</span>'
                 f'<span class="lg-bb">━ 布林</span>'
                 f'<span class="lg-ma200">━ MA200</span>'
-                f'<span class="lg-fib60">▓▓ Fib60</span>'
-                f'<span class="lg-fib20">▓▓ Fib20</span>'
                 f"</div>"
             )
         else:
@@ -732,7 +795,10 @@ def build_html(results, now_str):
     {html.escape(r['bb_label'])} · {html.escape(r['channel'])} · {html.escape(r['vol_desc'])} ·
     最後日K {pd.Timestamp(r['hist'].index[-1]).strftime('%Y-%m-%d')}
   </div>
-  {chart_html}
+  <div class="chart-pair">
+    <section class="chart-pane"><h3>技術圖</h3>{chart_html}</section>
+    <section class="chart-pane fibonacci-pane"><h3>Fibonacci 價格結構 <small>觀察</small></h3>{fibonacci_panel(r)}</section>
+  </div>
   <div class="sug">↳ {html.escape(r.get('suggestion', ''))}</div>
   <div class="ma">↳ 均線：{html.escape(r.get('ma_note', ''))}</div>
   <div class="fib">↳ {html.escape(r.get('fib_note', ''))}</div>
@@ -824,7 +890,7 @@ h2 {{ font-size: 1.05rem; margin: 20px 0 8px; border-bottom: 1px solid #333; pad
 .tag.narrow {{ background: #2a2a2a; color: #c9d1d9; }}
 .card-m {{ color: #9aa0a6; font-size: 0.8rem; margin-bottom: 8px; }}
 .chart img {{
-  width: 100%; max-width: 900px; height: auto;
+  width: 100%; max-width: none; height: auto;
   border-radius: 8px; display: block; background: #0f1115;
 }}
 .chart-meta {{
@@ -832,6 +898,20 @@ h2 {{ font-size: 1.05rem; margin: 20px 0 8px; border-bottom: 1px solid #333; pad
   font-variant-numeric: tabular-nums;
 }}
 .chart.miss {{ color: #6b7280; font-size: 0.8rem; }}
+.chart-pair {{ display: grid; grid-template-columns: minmax(0, 1.85fr) minmax(0, 1fr); gap: 16px; align-items: start; }}
+.chart-pane {{ min-width: 0; }}
+.chart-pane h3 {{ margin: 0 0 8px; font-size: 0.85rem; color: #c9d1d9; }}
+.chart-pane h3 small {{ color: #8b949e; font-weight: normal; }}
+.fibonacci-pane {{ background: #11151c; border: 1px solid #30363d; border-radius: 8px; padding: 10px; box-sizing: border-box; }}
+.fib-status {{ display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }}
+.fib-status b {{ color: #d2a8ff; }}
+.fib-context {{ color: #9aa0a6; font-size: 12px; line-height: 1.6; }}
+.fib-prices {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 8px 0; }}
+.fib-prices div {{ background: #1b2230; border-radius: 5px; padding: 6px 8px; font-size: 12px; }}
+.fib-prices span {{ color: #9aa0a6; margin-right: 6px; }}
+.fib-prices b {{ font-variant-numeric: tabular-nums; }}
+.fib-legacy {{ color: #8b949e; font-size: 11px; border-top: 1px solid #30363d; padding-top: 7px; margin-top: 8px; }}
+@media (max-width: 800px) {{ .chart-pair {{ grid-template-columns: minmax(0, 1fr); }} }}
 .chart-legend {{
   display: flex; flex-wrap: wrap; gap: 8px 12px; margin: 6px 0 4px;
   font-size: 11px; color: #9aa0a6;
@@ -869,7 +949,8 @@ tr.suggest td {{
 </head>
 <body>
 <h1>關鍵位 + Fib20/60 <span class="badge">全檔K線</span></h1>
-<div class="meta">產生時間：{html.escape(now_str)}（台灣時間） · 紫＝Fib60 · 青＝Fib20</div>
+<div class="meta">產生時間：{html.escape(now_str)}（台灣時間） · 左：技術圖／右：Fibonacci · 窄畫面上下排列</div>
+<p class="fib-context">Fibonacci 為已確認日線波段的觀察資訊，不改變既有訊號；至少 80 根日線，左右各 3 根確認高低點。兩圖使用相同的最近 80 根日期範圍。原 Fib20／Fib60 數值保留於右側參考。</p>
 
 <h2>摘要</h2>
 <div class="summary">
@@ -883,8 +964,7 @@ tr.suggest td {{
 <div class="legend">
   <i style="background:#58a6ff;margin-left:0"></i>支撐
   <i style="background:#f0c14b"></i>壓力
-  <i style="background:#a371f7"></i>Fib60
-  <i style="background:#39c5cf"></i>Fib20
+  <i style="background:#a371f7"></i>Fibonacci 獨立右圖
   <i style="background:#ff7b72"></i>MA200
 </div>
 
@@ -909,7 +989,7 @@ tr.suggest td {{
 </div>
 
 <div class="footer">
-Fib20青 / Fib60紫 · 均線已強化抓取 · 非投資建議 · report_charts.html
+技術圖與 Fibonacci 分開顯示 · 原 Fib20/60 僅作舊區間參考 · 非投資建議 · report_charts.html
 </div>
 </body>
 </html>
