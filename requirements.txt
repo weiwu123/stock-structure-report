@@ -3,6 +3,7 @@ numpy
 pytz
 matplotlib
 mplfinance
+six>=1.16,<2
 websocket-client
 pandas
 pandas_market_calendars>=5.1,<6
