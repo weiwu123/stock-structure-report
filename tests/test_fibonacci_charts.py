@@ -21,6 +21,30 @@ def history(count=240, scale=1):
 
 
 class FibonacciChartTests(unittest.TestCase):
+    def test_right_chart_draws_ohlc_bodies_and_wicks_for_each_visible_session(self):
+        from matplotlib.collections import PolyCollection, LineCollection
+        hist=history()
+        hist.loc[hist.index[-2],'Open']=hist.iloc[-2]['Close']-.5
+        hist.loc[hist.index[-1],'Open']=hist.iloc[-1]['Close']+.5
+        context=report.fibonacci_context(hist)
+        actual_close=report.plt.close
+        with patch.object(report.plt,'close') as close:
+            image=report.make_fibonacci_chart(hist,context,'CANDLE')
+            fig=close.call_args.args[0]
+        try:
+            ax=fig.axes[0]
+            bodies=[c for c in ax.collections if isinstance(c,PolyCollection)]
+            wicks=[c for c in ax.collections if isinstance(c,LineCollection)]
+            self.assertEqual(sum(len(c.get_paths()) for c in bodies),report.CHART_DAYS)
+            segments=[s for c in wicks for s in c.get_segments() if len(s)]
+            self.assertEqual(len(segments),2*report.CHART_DAYS)
+            self.assertAlmostEqual(max(p[1] for s in segments for p in s),hist.tail(report.CHART_DAYS)['High'].max())
+            self.assertAlmostEqual(min(p[1] for s in segments for p in s),hist.tail(report.CHART_DAYS)['Low'].min())
+            self.assertGreater(len(np.unique(bodies[0].get_facecolors(),axis=0)),1)
+            self.assertTrue(base64.b64decode(image).startswith(b'\x89PNG'))
+        finally:
+            actual_close(fig)
+
     def test_wave_confirmation_directions_and_scale(self):
         hist=history()
         directions=set()

@@ -667,14 +667,17 @@ def fibonacci_context(hist):
 
 
 def make_fibonacci_chart(hist, context, ticker):
-    """A separate close-price chart; legacy overlays never return to the left chart."""
+    """Separate OHLC candles with Fibonacci levels; no extra technical overlays."""
     fig = None
     try:
         df = hist.tail(CHART_DAYS)
         fig, ax = plt.subplots(figsize=(4.8, 4.1), facecolor='#11151c')
         ax.set_facecolor('#11151c')
-        x = np.arange(len(df))
-        ax.plot(x, df['Close'].to_numpy(dtype=float), color='#c9d1d9', linewidth=1.5)
+        marketcolors = mpf.make_marketcolors(
+            up='#3dd68c', down='#ff6b6b', edge='inherit', wick='inherit')
+        style = mpf.make_mpf_style(base_mpf_style='nightclouds', marketcolors=marketcolors)
+        mpf.plot(df, type='candle', ax=ax, volume=False, style=style,
+                 show_nontrading=False, update_width_config=dict(candle_width=.62, candle_linewidth=.7))
         colors = ['#58a6ff','#39c5cf','#a371f7','#f0c14b']
         if context.get('quality') == 'OK':
             for (ratio, level), color in zip(context['levels'].items(), colors):
@@ -692,7 +695,7 @@ def make_fibonacci_chart(hist, context, ticker):
         ax.tick_params(colors='#8b949e',labelsize=8)
         for spine in ax.spines.values():spine.set_color('#30363d')
         ax.grid(color='#30363d',alpha=.5,linestyle='--')
-        ax.set_title(ticker+' · Fibonacci',color='#d2a8ff',fontsize=11,loc='left')
+        ax.set_title(ticker+' · Fibonacci OHLC',color='#d2a8ff',fontsize=11,loc='left')
         fig.subplots_adjust(left=.15,right=.85,bottom=.13,top=.9)
         buf = io.BytesIO()
         fig.savefig(buf,format='png',dpi=130,facecolor='#11151c')
@@ -711,7 +714,8 @@ def fibonacci_panel(row):
                'PRICE_DISCONTINUITY':'波段內有大幅跳空，待確認價格／公司行動'}
     parts = [f'<div class="fib-status"><b>{html.escape(state)}</b><span>{labels.get(state,"等待")}</span></div>']
     if row.get('fibonacci_chart'):
-        parts.append(f'<div class="chart"><img src="data:image/png;base64,{row["fibonacci_chart"]}" alt="{html.escape(row["ticker"])} Fibonacci 獨立圖"/></div>')
+        parts.append(f'<div class="chart"><img src="data:image/png;base64,{row["fibonacci_chart"]}" alt="{html.escape(row["ticker"])} Fibonacci 獨立圖（K線）"/></div>')
+        parts.append('<div class="chart-legend"><span style="color:#3dd68c">綠：收高於開</span><span style="color:#ff6b6b">紅：收低於開</span><span>影線：當日高低價</span></div>')
     if quality == 'OK':
         parts.append('<div class="fib-prices">'+''.join(
             f'<div><span>{ratio}</span><b>{level:.2f}</b></div>' for ratio,level in c['levels'].items())+'</div>')
@@ -797,7 +801,7 @@ def build_html(results, now_str):
   </div>
   <div class="chart-pair">
     <section class="chart-pane"><h3>技術圖</h3>{chart_html}</section>
-    <section class="chart-pane fibonacci-pane"><h3>Fibonacci 價格結構 <small>觀察</small></h3>{fibonacci_panel(r)}</section>
+    <section class="chart-pane fibonacci-pane"><h3>Fibonacci 價格結構 <small>K線 · 觀察</small></h3>{fibonacci_panel(r)}</section>
   </div>
   <div class="sug">↳ {html.escape(r.get('suggestion', ''))}</div>
   <div class="ma">↳ 均線：{html.escape(r.get('ma_note', ''))}</div>
